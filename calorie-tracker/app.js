@@ -13,7 +13,8 @@ let state = {
     historySelectMode: false,
     historySelectedEntries: new Set(),
     tempCsvData: null,
-    csvSource: null
+    csvSource: null,
+    autoSyncing: false
 };
 
 const LOG_LEVELS = {
@@ -212,6 +213,12 @@ async function saveLogs() {
 function showPage(p) {
     document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+    
+    // Auto-close logs panel when switching pages
+    const logPanel = document.getElementById('log-panel');
+    if (logPanel && logPanel.getAttribute('aria-hidden') === 'false') {
+        logPanel.setAttribute('aria-hidden', 'true');
+    }
     
     const page = document.getElementById(`page-${p}`);
     if (page) page.classList.add('active');
@@ -488,11 +495,52 @@ function clearFormFields() {
 function saveSettings() {
     const t = document.getElementById('cfg-token').value.trim();
     const r = document.getElementById('cfg-repo').value.trim();
+    const autoSaveCheckbox = document.getElementById('cfg-autosave');
+    const autoSave = autoSaveCheckbox ? autoSaveCheckbox.checked : false;
+    
     localStorage.setItem('gt_token', t);
     localStorage.setItem('gt_repo', r);
+    setConfig('autoSave', autoSave);
+    
+    updateAutoSaveUI();
     dbg("Settings saved");
     toggleSettings();
     fetchFromGit();
+}
+
+function updateAutoSaveUI() {
+    const autoSave = getConfig('autoSave');
+    const pushBtns = document.querySelectorAll('[onclick="pushToGit()"]');
+    
+    pushBtns.forEach(btn => {
+        if (autoSave) {
+            btn.classList.add('auto-syncing');
+            if (!btn.querySelector('.sync-icon')) {
+                const icon = document.createElement('span');
+                icon.className = 'sync-icon';
+                icon.textContent = '🔄';
+                btn.insertBefore(icon, btn.firstChild);
+                btn.insertBefore(document.createTextNode(' '), icon.nextSibling);
+            }
+        } else {
+            btn.classList.remove('auto-syncing');
+            const icon = btn.querySelector('.sync-icon');
+            if (icon) {
+                icon.nextSibling?.remove();
+                icon.remove();
+            }
+        }
+    });
+}
+
+let autoSaveTimeout = null;
+function autoSave() {
+    clearTimeout(autoSaveTimeout);
+    autoSaveTimeout = setTimeout(() => {
+        if (!state.autoSyncing) {
+            pushToGit(true);
+        }
+    }, 3000);
 }
 
 async function fetchFromGit() {
@@ -650,6 +698,9 @@ function render() {
             display = display.replace(`{${key}}`, entry[key]);
         });
         
+        // Remove date from display since we're only showing today's entries
+        display = display.replace(/\d{4}-\d{2}-\d{2}\s*-?\s*/g, '');
+        
         // Check if entry has macros
         const hasMacros = entry.protein || entry.carbs || entry.fat;
         let macroHtml = '';
@@ -689,6 +740,11 @@ function deleteEntry(index) {
         state.entries.splice(index, 1);
         state.hasUnsavedChanges = true;
         render();
+        
+        // Auto-save if enabled
+        if (getConfig('autoSave')) {
+            autoSave();
+        }
     }
 }
 

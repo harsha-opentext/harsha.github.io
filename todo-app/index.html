@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>Todo App</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="config.js"></script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <a href="../index.html" class="icon-btn" title="Back to Apps" style="text-decoration: none;">←</a>
+                <h1>✓ Todos</h1>
+            </div>
+            <div class="header-actions">
+                <button class="icon-btn" onclick="fetchFromGit()" title="Fetch from GitHub">⬇️</button>
+                <button class="icon-btn" onclick="pushToGit()" title="Push to GitHub">📤</button>
+                <button class="icon-btn" onclick="showSettings()" title="Settings">⚙️</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Add Todo Form -->
+        <div class="add-todo-card">
+            <input type="text" id="todo-input" placeholder="What needs to be done?" class="todo-input" onkeypress="handleKeyPress(event)">
+            <button class="btn-primary" onclick="addTodo()">Add</button>
+        </div>
+
+        <!-- Filter Tabs -->
+        <div class="filter-tabs">
+            <button class="filter-tab active" data-filter="all" onclick="setFilter('all')">All (<span id="count-all">0</span>)</button>
+            <button class="filter-tab" data-filter="active" onclick="setFilter('active')">Active (<span id="count-active">0</span>)</button>
+            <button class="filter-tab" data-filter="completed" onclick="setFilter('completed')">Done (<span id="count-completed">0</span>)</button>
+        </div>
+
+        <!-- Todo List -->
+        <div class="todo-list" id="todo-list">
+            <!-- Todos will be rendered here -->
+        </div>
+
+        <!-- Empty State -->
+        <div class="empty-state" id="empty-state">
+            <div class="empty-icon">📝</div>
+            <p>No todos yet</p>
+            <p class="empty-subtitle">Add one above to get started!</p>
+        </div>
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⚙️ Settings</h2>
+                <button onclick="closeSettings()" class="modal-close">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h3>🔐 GitHub Configuration</h3>
+                    <div class="form-group">
+                        <label>Personal Access Token</label>
+                        <input type="password" id="cfg-token" placeholder="ghp_..." class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label>Repository Path</label>
+                        <input type="text" id="cfg-repo" placeholder="username/repo-name" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                            <input type="checkbox" id="cfg-autosave" style="width: 24px; height: 24px; cursor: pointer;">
+                            <div>
+                                <div style="font-weight: 600;">🔄 Auto-Save</div>
+                                <div style="font-size: 13px; color: var(--text-secondary); font-weight: normal;">Automatically sync changes to GitHub</div>
+                            </div>
+                        </label>
+                    </div>
+                    <button class="btn-primary" onclick="saveSettings()">💾 Save & Connect</button>
+                </div>
+
+                <div class="settings-section">
+                    <h3>🔄 Data Management</h3>
+                    <button class="btn-secondary" onclick="fetchFromGit()">⬇️ Fetch from GitHub</button>
+                    <button class="btn-secondary" onclick="pushToGit()">⬆️ Push to GitHub</button>
+                    <button class="btn-danger" onclick="clearAllData()">🗑️ Clear All Todos</button>
+                </div>
+
+                <div class="settings-section">
+                    <h3>📱 App Info</h3>
+                    <p><strong>Version:</strong> 1.0.0</p>
+                    <p><strong>Data File:</strong> <code>todos.json</code></p>
+                    <p><strong>Total Todos:</strong> <span id="total-todos-count">0</span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

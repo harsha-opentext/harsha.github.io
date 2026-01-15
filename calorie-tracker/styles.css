@@ -290,6 +290,19 @@ input:focus, select:focus {
     border-color: var(--primary);
 }
 
+/* Checkbox */
+input[type="checkbox"] {
+    accent-color: var(--primary);
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+}
+
+input[type="checkbox"]:checked {
+    background-color: var(--primary);
+    border-color: var(--primary);
+}
+
 .form-input {
     display: block;
     margin-bottom: 12px;
@@ -376,6 +389,16 @@ button.loading::after {
     background: var(--primary-hover);
     transform: scale(0.97);
     box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3);
+}
+
+.btn-primary.auto-syncing .sync-icon {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 .btn-secondary {
