@@ -1,0 +1,29 @@
+:root { --bg: #f4f7f6; --primary: #007aff; --err: #ff3b30; --text: #333; }
+body, html { margin: 0; padding: 0; font-family: -apple-system, sans-serif; background: var(--bg); height: 100%; overflow: hidden; }
+
+/* Navigation Tabs */
+nav { display: flex; background: #000; padding-top: 40px; }
+nav button { flex: 1; padding: 15px; border: none; background: #222; color: #888; font-weight: bold; }
+nav button.active { background: #000; color: #fff; border-bottom: 3px solid var(--primary); }
+
+.page { display: none; height: calc(100vh - 100px); flex-direction: column; }
+.page.active { display: flex; }
+
+/* App Page */
+.container { flex: 1; padding: 20px; overflow-y: auto; }
+.entry-card { background: #fff; padding: 15px; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+.controls { background: #fff; padding: 20px; border-top: 1px solid #ddd; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+input { padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; width: 100%; box-sizing: border-box; }
+button { padding: 12px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+.btn-add { background: var(--primary); color: white; }
+.btn-save { background: #28a745; color: white; grid-column: span 2; }
+
+/* Log Page */
+#log-screen { background: #121212; color: #0f0; font-family: 'Courier New', monospace; font-size: 12px; padding: 10px; overflow-y: auto; flex: 1; white-space: pre-wrap; word-break: break-all; }
+.log-item { margin-bottom: 8px; border-bottom: 1px solid #333; padding-bottom: 4px; }
+.log-error { color: #ff6b6b; font-weight: bold; }
+.log-warn { color: #ffcc00; }
+.log-header { color: #00d4ff; font-weight: bold; }
+
+#settings-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center; padding: 20px; z-index: 1000; }
+.modal-content { background: white; padding: 25px; border-radius: 15px; width: 100%; display: flex; flex-direction: column; gap: 15px; }
