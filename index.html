@@ -4,64 +4,240 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>Git-Base v2 (Debug Pro)</title>
+    <title>Calorie Tracker Pro</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="config.js"></script>
 </head>
 <body>
 
-    <nav>
-        <button id="tab-app" class="active" onclick="showPage('app')">TRACKER</button>
+    <!-- Navigation Bar -->
+    <nav class="main-nav">
+        <div class="nav-brand">📊 Tracker Pro</div>
+        <div class="nav-links">
+            <button id="tab-tracker" class="nav-btn active" onclick="showPage('tracker')">
+                <span class="icon">➕</span>
+                <span class="label">Add Entry</span>
+            </button>
+            <button id="tab-history" class="nav-btn" onclick="showPage('history')">
+                <span class="icon">📋</span>
+                <span class="label">History</span>
+            </button>
+            <button id="tab-analytics" class="nav-btn" onclick="showPage('analytics')">
+                <span class="icon">📈</span>
+                <span class="label">Analytics</span>
+            </button>
+            <button id="tab-settings" class="nav-btn" onclick="showPage('settings')">
+                <span class="icon">⚙️</span>
+                <span class="label">Settings</span>
+            </button>
+            <button id="tab-logs" class="nav-btn" onclick="toggleLogs()">
+                <span class="icon">🔍</span>
+                <span class="label">Logs</span>
+            </button>
+        </div>
     </nav>
 
-    <!-- PAGE 1: APP (now with split log panel) -->
-    <div id="page-app" class="page active">
-        <div class="app-wrapper">
-            <main class="app-panel">
-                <header style="padding: 20px; background: #000; color: #fff;">
-                    <span>TODAY</span>
-                    <h1 id="total-kcal" style="margin: 0;">0 kcal</h1>
-                    <button onclick="toggleSettings()" style="margin-top: 10px; font-size: 12px; background: #333; color: #ccc;">⚙️ API CONFIG</button>
-                </header>
-                <div class="container" id="list-container"></div>
-                <div class="controls">
-                    <input type="text" id="food-name" placeholder="Food Name">
-                    <input type="number" id="food-kcal" placeholder="Kcal">
-                    <button class="btn-add" onclick="addEntry()">Add Locally</button>
-                    <button class="btn-add" style="background:#666" onclick="fetchFromGit()">Fetch Git</button>
-                    <button class="btn-save" onclick="pushToGit()">Push to GitHub</button>
+    <!-- PAGE: ADD ENTRY (TRACKER) -->
+    <div id="page-tracker" class="page active">
+        <div class="page-header">
+            <div class="header-actions">
+                <button class="icon-btn" onclick="reloadApp()" title="Refresh Data">🔄</button>
+                <div style="display: flex; gap: 8px; padding-left: 8px; border-left: 1px solid var(--border);">
+                    <button class="btn-secondary" onclick="fetchFromGit()" style="padding: 10px 16px; font-size: 14px;">⬇️ Fetch Data</button>
+                    <button class="btn-primary" onclick="pushToGit()" style="padding: 10px 16px; font-size: 14px;">📤 Publish Data</button>
                 </div>
-            </main>
+                <div style="display: flex; gap: 8px; padding-left: 8px; border-left: 1px solid var(--border);">
+                    <button class="btn-secondary" onclick="openCsvImport()" style="padding: 10px 16px; font-size: 14px;">📄 Import CSV</button>
+                    <button id="select-mode-btn" class="btn-secondary" onclick="toggleSelectMode()" style="padding: 10px 16px; font-size: 14px;">☑️ Select</button>
+                </div>
+            </div>
+            <h1>Today's Entries</h1>
+        </div>
+        
+        <div id="bulk-actions">
+            <button class="btn-secondary" onclick="selectAll()" style="flex: 1;">☑️ Select All</button>
+            <button class="btn-danger" onclick="bulkDelete()" style="flex: 1;">🗑️ Delete Selected (<span id="selected-count">0</span>)</button>
+            <button class="btn-secondary" onclick="exportSelectedToCsv()" style="flex: 1;">📄 Export to CSV</button>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-label">Total Today</div>
+            <div class="stat-value" id="total-kcal">0 kcal</div>
+        </div>
 
-            <aside class="log-panel" id="log-panel" aria-hidden="true">
-                <div class="log-header-bar">
-                    <span>System Logs</span>
-                    <div class="log-controls">
-                        <select id="log-retention" onchange="updateRetention()">
-                            <option value="2">Last 2 min</option>
-                            <option value="5" selected>Last 5 min</option>
-                            <option value="15">Last 15 min</option>
-                            <option value="60">Last 60 min</option>
-                            <option value="0">All</option>
-                        </select>
-                        <button onclick="copyLogs()" style="padding: 4px 8px; font-size: 12px;">Copy</button>
-                        <button onclick="clearLogs()" style="padding: 4px 8px; font-size: 12px;">Clear</button>
-                        <button onclick="toggleLogs()" style="padding: 4px 8px; font-size: 12px;">Close</button>
-                    </div>
-                </div>
-                <div id="log-screen"></div>
-            </aside>
+        <div class="container" id="list-container"></div>
+        
+        <div class="form-panel">
+            <h3>Add New Entry</h3>
+            <div class="controls" id="form-container">
+                <!-- Form fields and button will be dynamically generated here -->
+            </div>
         </div>
     </div>
 
-    <!-- Logs are now shown in a split panel on the right of the main app -->
+    <!-- PAGE: HISTORY -->
+    <div id="page-history" class="page">
+        <div class="page-header">
+            <h1>Entry History</h1>
+            <div class="header-actions">
+                <button class="btn-secondary" onclick="fetchFromGit()" style="padding: 10px 16px; font-size: 14px;">⬇️ Fetch Data</button>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <input type="date" id="filter-date" class="date-filter" onchange="handleDateSelection()">
+                </div>
+                <input type="text" id="filter-food" class="date-filter" placeholder="Search food..." oninput="filterHistory()" style="width: 150px;">
+                <button class="btn-secondary" onclick="clearFilters()" style="padding: 10px 20px;">✕ Clear</button>
+                <button id="history-select-mode-btn" class="btn-secondary" onclick="toggleHistorySelectMode()" style="padding: 10px 16px; font-size: 14px;">☑️ Select</button>
+            </div>
+        </div>
+        
+        <div id="history-bulk-actions">
+            <button class="btn-secondary" onclick="historySelectAll()" style="flex: 1;">☑️ Select All</button>
+            <button class="btn-danger" onclick="historyBulkDelete()" style="flex: 1;">🗑️ Delete Selected (<span id="history-selected-count">0</span>)</button>
+            <button class="btn-secondary" onclick="historyExportSelectedToCsv()" style="flex: 1;">📄 Export to CSV</button>
+        </div>
+        
+        <div class="history-stats">
+            <div class="stat-card-small">
+                <div class="stat-label">Total Entries</div>
+                <div class="stat-value" id="history-total-entries">0</div>
+            </div>
+            <div class="stat-card-small">
+                <div class="stat-label">Total Calories</div>
+                <div class="stat-value" id="history-total-calories">0</div>
+            </div>
+            <div class="stat-card-small">
+                <div class="stat-label">Avg/Day</div>
+                <div class="stat-value" id="history-avg-calories">0</div>
+            </div>
+        </div>
 
-    <div id="settings-modal">
+        <div class="container" id="history-container"></div>
+    </div>
+
+    <!-- PAGE: ANALYTICS -->
+    <div id="page-analytics" class="page">
+        <div class="page-header">
+            <h1>Analytics & Insights</h1>
+            <div class="header-actions">
+                <input type="date" id="analytics-date" class="date-filter" onchange="updateAnalytics()">
+            </div>
+        </div>
+
+        <div id="analytics-loading" class="loading-container" style="display: none;">
+            <div class="spinner"></div>
+            <div class="loading-text">Loading data...</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="analytics-progress"></div>
+            </div>
+        </div>
+
+        <div id="analytics-content">
+            <div class="chart-container">
+                <h3>Calorie Distribution by Meal</h3>
+                <canvas id="chart-meal-distribution"></canvas>
+            </div>
+            
+            <div class="chart-container">
+                <h3>Macro Distribution</h3>
+                <canvas id="chart-macro-distribution"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- PAGE: SETTINGS -->
+    <div id="page-settings" class="page">
+        <div class="page-header">
+            <h1>Settings</h1>
+        </div>
+
+        <div class="settings-section">
+            <h3>🔐 GitHub Configuration</h3>
+            <div class="form-group">
+                <label>Personal Access Token</label>
+                <input type="password" id="cfg-token" placeholder="ghp_..." class="form-input">
+            </div>
+            <div class="form-group">
+                <label>Repository Path</label>
+                <input type="text" id="cfg-repo" placeholder="username/repo-name" class="form-input">
+            </div>
+            <button class="btn-primary" onclick="saveSettings()">💾 Save & Connect</button>
+        </div>
+
+        <div class="settings-section">
+            <h3>🔄 Data Management</h3>
+            <button class="btn-secondary" onclick="fetchFromGit()">⬇️ Fetch from GitHub</button>
+            <button class="btn-secondary" onclick="pushToGit()">⬆️ Push to GitHub</button>
+            <button class="btn-danger" onclick="clearAllData()">🗑️ Clear Local Data</button>
+        </div>
+
+        <div class="settings-section">
+            <h3>📱 App Info</h3>
+            <p><strong>Version:</strong> 2.0.0</p>
+            <p><strong>Data File:</strong> <code id="settings-datafile">data.json</code></p>
+            <p><strong>Schema:</strong> <code id="settings-schema">Loading...</code></p>
+        </div>
+    </div>
+
+    <!-- Log Panel (Slide-out) -->
+    <aside class="log-panel" id="log-panel" aria-hidden="true">
+        <div class="log-header-bar">
+            <span>🔍 System Logs</span>
+            <div class="log-controls">
+                <select id="log-level" onchange="updateLogLevel()" title="Log Level">
+                    <option value="debug">Debug</option>
+                    <option value="info" selected>Info</option>
+                    <option value="warn">Warn</option>
+                    <option value="error">Error</option>
+                </select>
+                <select id="log-retention" onchange="updateRetention()" title="Log Retention">
+                    <option value="2">2 min</option>
+                    <option value="5" selected>5 min</option>
+                    <option value="15">15 min</option>
+                    <option value="60">60 min</option>
+                    <option value="0">All</option>
+                </select>
+                <button onclick="saveLogs()" class="log-icon-btn" title="Save Logs to GitHub">💾</button>
+                <button onclick="copyLogs()" class="log-icon-btn" title="Copy Logs">📋</button>
+                <button onclick="clearLogs()" class="log-icon-btn" title="Clear Logs">🗑️</button>
+                <button onclick="toggleLogs()" class="log-icon-btn" title="Close">✕</button>
+            </div>
+        </div>
+        <div id="log-screen"></div>
+    </aside>
+
+    <!-- CSV Import Modal -->
+    <div id="csv-modal" class="modal" style="display: none;">
         <div class="modal-content">
-            <h3>API Settings</h3>
-            <input type="password" id="cfg-token" placeholder="Personal Access Token (ghp_...)">
-            <input type="text" id="cfg-repo" placeholder="owner/repo (e.g. harsha-opentext/private-data)">
-            <button class="btn-add" onclick="saveSettings()">Save & Connect</button>
-            <button onclick="toggleSettings()" style="background: #eee;">Close</button>
+            <div class="modal-header">
+                <h2>📄 Import from CSV</h2>
+                <button onclick="closeCsvImport()" class="modal-close">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="csv-input-section">
+                    <p style="color: var(--text-secondary); margin-bottom: 12px;">Paste your CSV data below. Expected format:</p>
+                    <pre style="background: var(--bg); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-secondary);">Date,Time,Food,Calories,Prot (g),Carb (g),Fat (g)
+2026-01-15,9:00 AM,Eggs (2 whole + 2 whites),220,20.0,2.0,10.0
+2026-01-15,,Korean BBQ noodles (90 g),289,7.4,37.4,12.2</pre>
+                    <textarea id="csv-input" placeholder="Paste CSV data here..." style="width: 100%; height: 200px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 13px; margin: 12px 0;"></textarea>
+                    <button class="btn-primary" onclick="parseCsv()" style="width: 100%;">🔍 Parse & Preview</button>
+                </div>
+                
+                <div id="csv-preview-section" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 16px; background: var(--bg); border-radius: 12px;">
+                        <div>
+                            <h3 style="margin: 0 0 4px 0; font-size: 18px;">Preview</h3>
+                            <p style="margin: 0; color: var(--text-secondary); font-size: 14px;"><span id="csv-count">0</span> entries ready to import</p>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn-secondary" onclick="backToCsvInput()" style="padding: 10px 20px;">← Back</button>
+                            <button class="btn-primary" onclick="importCsvEntries()" style="padding: 10px 20px;">✅ Import All</button>
+                        </div>
+                    </div>
+                    <div id="csv-preview-list" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 12px;"></div>
+                </div>
+            </div>
         </div>
     </div>
 

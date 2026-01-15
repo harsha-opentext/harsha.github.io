@@ -1,0 +1,69 @@
+# Data schema definition
+# Define your data structure here and the app will automatically generate input fields
+
+schema:
+  name: "calorie_tracker"
+  displayName: "Calorie Tracker"
+  fields:
+    - name: "timestamp"
+      type: "hidden"
+      label: "Timestamp"
+      autoCapture: true
+      
+    - name: "date"
+      type: "date"
+      label: "Date"
+      required: true
+      default: "today"
+      
+    - name: "food"
+      type: "text"
+      label: "Food Name"
+      required: true
+      placeholder: "Enter food name"
+      
+    - name: "calories"
+      type: "number"
+      label: "Calories (kcal)"
+      required: true
+      min: 0
+      placeholder: "Enter calories"
+      
+    - name: "protein"
+      type: "number"
+      label: "Protein (g)"
+      required: false
+      min: 0
+      placeholder: "Optional"
+      
+    - name: "carbs"
+      type: "number"
+      label: "Carbs (g)"
+      required: false
+      min: 0
+      placeholder: "Optional"
+      
+    - name: "fat"
+      type: "number"
+      label: "Fat (g)"
+      required: false
+      min: 0
+      placeholder: "Optional"
+      
+    - name: "time"
+      type: "select"
+      label: "Time"
+      required: false
+      options:
+        - "Current Time"
+        - "Breakfast (9:00 AM)"
+        - "Lunch (1:00 PM)"
+        - "Dinner (7:00 PM)"
+        - "Snack (3:00 PM)"
+      default: "Current Time"
+
+  # Define which field to sum for totals
+  totalField: "calories"
+  
+  # Define how entries are displayed
+  displayFormat: "{date} at {time} - {food} - {calories} kcal"
