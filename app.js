@@ -11,7 +11,9 @@ let state = {
     selectedEntries: new Set(),
     hasUnsavedChanges: false,
     historySelectMode: false,
-    historySelectedEntries: new Set()
+    historySelectedEntries: new Set(),
+    tempCsvData: null,
+    csvSource: null
 };
 
 const LOG_LEVELS = {
@@ -599,7 +601,10 @@ async function pushToGit() {
             state.hasUnsavedChanges = false;
             dbg("Successfully saved to GitHub", 'info');
             dbg(`New SHA: ${state.sha.substring(0, 8)}...`, 'debug');
-            alert("✅ Successfully published to GitHub!");
+            
+            // Format nice success message
+            const [owner, repoName] = repo.split('/');
+            alert(`✅ Successfully published!\n\n📁 Repository: ${repoName}\n👤 Owner: ${owner}\n📄 File: ${dataFile}\n\n${state.entries.length} entries saved`);
         } else {
             const err = await res.json();
             dbg(`Push failed: ${err.message || 'Unknown error'}`, "error", err);
@@ -788,11 +793,10 @@ function exportSelectedToCsv() {
     const indices = Array.from(state.selectedEntries).sort((a, b) => a - b);
     const selectedData = indices.map(i => state.entries[i]);
     
-    // Build CSV header
+    // Build CSV
     const headers = ['Date', 'Time', 'Food', 'Calories', 'Protein (g)', 'Carbs (g)', 'Fat (g)'];
     let csv = headers.join(',') + '\n';
     
-    // Add data rows
     selectedData.forEach(entry => {
         const row = [
             entry.date || '',
@@ -806,20 +810,8 @@ function exportSelectedToCsv() {
         csv += row.join(',') + '\n';
     });
     
-    // Download CSV
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `exported_entries_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    
-    dbg(`Exported ${selectedData.length} entries to CSV`, 'info');
-    alert(`Exported ${selectedData.length} entries to CSV!`);
-    
-    // Exit select mode after action
-    toggleSelectMode();
+    // Show export modal
+    showCsvExportModal(csv, selectedData.length, 'tracker');
 }
 
 function addEntry() {
@@ -1136,16 +1128,8 @@ function historyExportSelectedToCsv() {
         csv += row.join(',') + '\n';
     });
     
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `exported_entries_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-    
-    dbg(`Exported ${selectedData.length} entries to CSV from history`, 'info');
-    toggleHistorySelectMode();
+    // Show export modal
+    showCsvExportModal(csv, selectedData.length, 'history');
 }
 
 function editEntry(index) {
@@ -1413,6 +1397,94 @@ function reloadApp() {
 
 function toggleSettings() {
     // Remove old modal code
+}
+
+function showCsvExportModal(csvData, entryCount, source) {
+    state.tempCsvData = csvData;
+    state.csvSource = source;
+    
+    document.getElementById('csv-export-count').textContent = entryCount;
+    document.getElementById('csv-export-modal').style.display = 'flex';
+}
+
+function closeCsvExportModal() {
+    document.getElementById('csv-export-modal').style.display = 'none';
+    state.tempCsvData = null;
+}
+
+async function downloadCsv() {
+    if (!state.tempCsvData) return;
+    
+    const blob = new Blob([state.tempCsvData], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `exported_entries_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+    
+    dbg(`Downloaded CSV file`, 'info');
+    
+    closeCsvExportModal();
+    
+    // Exit select mode
+    if (state.csvSource === 'tracker') {
+        toggleSelectMode();
+    } else if (state.csvSource === 'history') {
+        toggleHistorySelectMode();
+    }
+}
+
+async function copyCsvToClipboard() {
+    if (!state.tempCsvData) return;
+    
+    try {
+        await navigator.clipboard.writeText(state.tempCsvData);
+        dbg('CSV copied to clipboard', 'info');
+        
+        // Show success feedback
+        const btn = event.target;
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '✅ Copied!';
+        btn.style.background = 'var(--success)';
+        
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.style.background = '';
+            closeCsvExportModal();
+            
+            // Exit select mode
+            if (state.csvSource === 'tracker') {
+                toggleSelectMode();
+            } else if (state.csvSource === 'history') {
+                toggleHistorySelectMode();
+            }
+        }, 1500);
+    } catch (err) {
+        dbg(`Failed to copy to clipboard: ${err.message}`, 'error');
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = state.tempCsvData;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
+            alert('CSV copied to clipboard!');
+            closeCsvExportModal();
+            
+            // Exit select mode
+            if (state.csvSource === 'tracker') {
+                toggleSelectMode();
+            } else if (state.csvSource === 'history') {
+                toggleHistorySelectMode();
+            }
+        } catch (e) {
+            alert('Failed to copy. Please try the download option.');
+        }
+        textarea.remove();
+    }
 }
 
 window.onload = async () => {

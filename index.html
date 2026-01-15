@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>Calorie Tracker Pro</title>
     <link rel="stylesheet" href="styles.css">
     <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
@@ -237,6 +238,33 @@
                     </div>
                     <div id="csv-preview-list" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 12px;"></div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CSV Export Modal -->
+    <div id="csv-export-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2>📄 Export CSV</h2>
+                <button onclick="closeCsvExportModal()" class="modal-close">✕</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--text-secondary); margin-bottom: 24px; text-align: center;">
+                    Ready to export <strong><span id="csv-export-count">0</span> entries</strong>
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <button class="btn-primary" onclick="downloadCsv()" style="width: 100%; padding: 16px; font-size: 16px;">
+                        💾 Download as File
+                    </button>
+                    <button class="btn-secondary" onclick="copyCsvToClipboard()" style="width: 100%; padding: 16px; font-size: 16px;">
+                        📋 Copy to Clipboard
+                    </button>
+                </div>
+                <p style="color: var(--text-secondary); font-size: 13px; margin-top: 20px; text-align: center;">
+                    Download saves a .csv file to your device.<br>
+                    Copy puts the CSV data in your clipboard for pasting elsewhere.
+                </p>
             </div>
         </div>
     </div>
