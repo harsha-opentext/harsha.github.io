@@ -1,4 +1,4 @@
-let state = { entries: [], sha: "" };
+let state = { entries: [], sha: "", logs: [], retentionMinutes: 5 };
 
 // --- EXTENSIVE LOGGING SYSTEM ---
 function dbg(msg, type = 'info', raw = null) {
@@ -13,9 +13,59 @@ function dbg(msg, type = 'info', raw = null) {
 
     item.innerText = text;
     screen.prepend(item); // Newest logs at top
+
+    // Store log in state with timestamp for retention policy
+    try {
+        state.logs.unshift({ ts: Date.now(), text, type });
+        pruneLogs();
+    } catch (e) { /* ignore */ }
 }
 
 function clearLogs() { document.getElementById('log-screen').innerHTML = ''; }
+
+function pruneLogs() {
+    // retentionMinutes === 0 means keep all
+    if (!state.retentionMinutes || state.retentionMinutes <= 0) return;
+    const cutoff = Date.now() - state.retentionMinutes * 60 * 1000;
+    // remove logs older than cutoff
+    state.logs = state.logs.filter(l => l.ts >= cutoff);
+    // also truncate DOM if needed
+    const screen = document.getElementById('log-screen');
+    if (!screen) return;
+    // Re-render screen from state.logs
+    screen.innerHTML = '';
+    state.logs.forEach(l => {
+        const el = document.createElement('div');
+        el.className = `log-item ${l.type === 'error' ? 'log-error' : l.type === 'warn' ? 'log-warn' : ''}`;
+        el.innerText = l.text;
+        screen.appendChild(el);
+    });
+}
+
+function updateRetention() {
+    const sel = document.getElementById('log-retention');
+    if (!sel) return;
+    const v = parseInt(sel.value, 10);
+    state.retentionMinutes = v;
+    pruneLogs();
+}
+
+async function copyLogs() {
+    const txt = state.logs.map(l => l.text).join('\n\n');
+    try {
+        await navigator.clipboard.writeText(txt);
+        dbg('Logs copied to clipboard.');
+    } catch (e) {
+        // fallback: create temporary textarea
+        const ta = document.createElement('textarea');
+        ta.value = txt;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        dbg('Logs copied (fallback).');
+    }
+}
 
 function showPage(p) {
     // With the logs moved to a split panel, ignore attempts to show the old logs page

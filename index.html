@@ -11,7 +11,6 @@
 
     <nav>
         <button id="tab-app" class="active" onclick="showPage('app')">TRACKER</button>
-        <button id="tab-logs" onclick="toggleLogs()">DEBUG CONSOLE</button>
     </nav>
 
     <!-- PAGE 1: APP (now with split log panel) -->
@@ -36,7 +35,15 @@
             <aside class="log-panel" id="log-panel" aria-hidden="true">
                 <div class="log-header-bar">
                     <span>System Logs</span>
-                    <div>
+                    <div class="log-controls">
+                        <select id="log-retention" onchange="updateRetention()">
+                            <option value="2">Last 2 min</option>
+                            <option value="5" selected>Last 5 min</option>
+                            <option value="15">Last 15 min</option>
+                            <option value="60">Last 60 min</option>
+                            <option value="0">All</option>
+                        </select>
+                        <button onclick="copyLogs()" style="padding: 4px 8px; font-size: 12px;">Copy</button>
                         <button onclick="clearLogs()" style="padding: 4px 8px; font-size: 12px;">Clear</button>
                         <button onclick="toggleLogs()" style="padding: 4px 8px; font-size: 12px;">Close</button>
                     </div>

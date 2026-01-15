@@ -16,6 +16,10 @@ nav button.active { background: #000; color: #fff; border-bottom: 3px solid var(
 .log-panel[aria-hidden="true"] { display: none; }
 .log-header-bar { padding: 10px; background: #111; color: #fff; display: flex; justify-content: space-between; align-items: center; }
 
+.log-controls { display: flex; gap: 8px; align-items: center; }
+.log-controls select { padding: 6px 8px; border-radius: 6px; border: 1px solid #333; background: #0d0d0d; color: #fff; }
+.log-controls button { padding: 6px 8px; border-radius: 6px; border: none; background: #222; color: #fff; cursor: pointer; }
+
 /* Responsive: hide log panel on small screens by default */
 @media (max-width: 900px) {
 	.log-panel { width: 100%; min-width: 0; position: absolute; right: 0; top: 80px; bottom: 0; z-index: 1000; }
