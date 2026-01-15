@@ -9,6 +9,19 @@ nav button.active { background: #000; color: #fff; border-bottom: 3px solid var(
 .page { display: none; height: calc(100vh - 100px); flex-direction: column; }
 .page.active { display: flex; }
 
+/* Split layout: app + log panel */
+.app-wrapper { display: flex; height: calc(100vh - 100px); }
+.app-panel { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+.log-panel { width: 36%; min-width: 280px; max-width: 50%; background: #0e0e0e; color: #ddd; display: flex; flex-direction: column; border-left: 1px solid #222; }
+.log-panel[aria-hidden="true"] { display: none; }
+.log-header-bar { padding: 10px; background: #111; color: #fff; display: flex; justify-content: space-between; align-items: center; }
+
+/* Responsive: hide log panel on small screens by default */
+@media (max-width: 900px) {
+	.log-panel { width: 100%; min-width: 0; position: absolute; right: 0; top: 80px; bottom: 0; z-index: 1000; }
+	.app-wrapper { position: relative; }
+}
+
 /* App Page */
 .container { flex: 1; padding: 20px; overflow-y: auto; }
 .entry-card { background: #fff; padding: 15px; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }

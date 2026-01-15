@@ -3,13 +3,14 @@ let state = { entries: [], sha: "" };
 // --- EXTENSIVE LOGGING SYSTEM ---
 function dbg(msg, type = 'info', raw = null) {
     const screen = document.getElementById('log-screen');
+    if (!screen) return; // If logs not yet in DOM, skip
     const item = document.createElement('div');
     item.className = `log-item ${type === 'error' ? 'log-error' : type === 'warn' ? 'log-warn' : ''}`;
-    
+
     const timestamp = new Date().toLocaleTimeString();
     let text = `[${timestamp}] ${msg}`;
     if (raw) text += `\nRAW: ${JSON.stringify(raw, null, 2)}`;
-    
+
     item.innerText = text;
     screen.prepend(item); // Newest logs at top
 }
@@ -17,10 +18,29 @@ function dbg(msg, type = 'info', raw = null) {
 function clearLogs() { document.getElementById('log-screen').innerHTML = ''; }
 
 function showPage(p) {
+    // With the logs moved to a split panel, ignore attempts to show the old logs page
+    if (p === 'logs') {
+        toggleLogs();
+        return;
+    }
     document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('nav button').forEach(el => el.classList.remove('active'));
-    document.getElementById(`page-${p}`).classList.add('active');
-    document.getElementById(`tab-${p}`).classList.add('active');
+    const page = document.getElementById(`page-${p}`);
+    if (page) page.classList.add('active');
+    const tab = document.getElementById(`tab-${p}`);
+    if (tab) tab.classList.add('active');
+}
+
+function toggleLogs() {
+    const panel = document.getElementById('log-panel');
+    if (!panel) return;
+    const hidden = panel.getAttribute('aria-hidden') === 'true';
+    panel.setAttribute('aria-hidden', hidden ? 'false' : 'true');
+    // When showing logs, also ensure it's scrolled to top for newest messages
+    if (hidden) {
+        const screen = document.getElementById('log-screen');
+        if (screen) screen.scrollTop = 0;
+    }
 }
 
 // --- CORE LOGIC ---
