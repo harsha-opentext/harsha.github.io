@@ -1809,12 +1809,24 @@ window.onload = async () => {
         render();
     } catch (e) { /* ignore if DOM not ready */ }
 
-    // Warn user about unsaved changes before leaving
+    // Warn user about unsaved changes before leaving only when auto-save is OFF
     window.addEventListener('beforeunload', (e) => {
-        if (state.hasUnsavedChanges) {
-            e.preventDefault();
-            e.returnValue = ''; // Modern browsers require this
-            return ''; // Some older browsers need a return value
+        try {
+            const autoSaveEnabled = getConfig('autoSave');
+            if (!autoSaveEnabled && state.hasUnsavedChanges) {
+                // Modern browsers ignore the custom string, but setting returnValue triggers the dialog
+                const msg = 'Auto-save is off and you have unsaved changes. These changes will NOT be stored if you leave or refresh.';
+                e.preventDefault();
+                e.returnValue = msg;
+                return msg;
+            }
+        } catch (err) {
+            // If config lookup fails, fall back to previous behavior
+            if (state.hasUnsavedChanges) {
+                e.preventDefault();
+                e.returnValue = '';
+                return '';
+            }
         }
     });
 };

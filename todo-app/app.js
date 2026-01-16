@@ -479,6 +479,25 @@ window.onload = async () => {
     }
 };
 
+// Warn user about unsaved changes before leaving only when auto-save is OFF
+window.addEventListener('beforeunload', (e) => {
+    try {
+        const autoSaveEnabled = getConfig('autoSave');
+        if (!autoSaveEnabled && state.hasUnsavedChanges) {
+            const msg = 'Auto-save is off and you have unsaved changes. These changes will NOT be stored if you leave or refresh.';
+            e.preventDefault();
+            e.returnValue = msg;
+            return msg;
+        }
+    } catch (err) {
+        if (state.hasUnsavedChanges) {
+            e.preventDefault();
+            e.returnValue = '';
+            return '';
+        }
+    }
+});
+
 // Add Todo
 function addTodo() {
     const input = document.getElementById('todo-input');
