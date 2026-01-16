@@ -1641,9 +1641,17 @@ function renderAnalytics(date) {
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                return context.label + ': ' + Math.round(context.parsed) + 'g';
+                                const value = context.parsed || 0;
+                                const dataArr = context.dataset.data || [];
+                                const total = dataArr.reduce((s, v) => s + (parseFloat(v) || 0), 0);
+                                const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+                                return `${context.label}: ${Math.round(value)}g (${pct}%)`;
                             }
                         }
+                    },
+                    // Optional: draw total in center for quick glance
+                    beforeDraw: function(chart) {
+                        // noop placeholder for Chart.js v4 plugin hook if needed later
                     }
                 }
             }
