@@ -3,6 +3,10 @@ const DEFAULT_CONFIG = {
     dataFile: 'todos.json',
     autoSave: false
 };
+// Default maximum description length (characters)
+DEFAULT_CONFIG.descriptionMaxLength = 2000;
+// Default maximum number of tags user can create
+DEFAULT_CONFIG.maxTags = 5;
 
 function getConfig(key) {
     const stored = localStorage.getItem(`todo_config_${key}`);

@@ -53,6 +53,9 @@
                     <button class="btn-secondary" onclick="fetchFromGit()" style="padding: 10px 16px; font-size: 14px;">⬇️ Fetch Data</button>
                     <button class="btn-primary" onclick="pushToGit()" style="padding: 10px 16px; font-size: 14px;">📤 Publish Data</button>
                 </div>
+                <div style="display:flex; align-items:center; gap:8px; padding-left:8px; border-left: 1px solid var(--border);">
+                    <button id="date-btn" class="btn-secondary" style="padding: 8px 12px; font-size: 13px;">Date</button>
+                </div>
                 <div style="display: flex; gap: 8px; padding-left: 8px; border-left: 1px solid var(--border);">
                     <button class="btn-secondary" onclick="openCsvImport()" style="padding: 10px 16px; font-size: 14px;">📄 Import CSV</button>
                     <button id="select-mode-btn" class="btn-secondary" onclick="toggleSelectMode()" style="padding: 10px 16px; font-size: 14px;">☑️ Select</button>
@@ -89,10 +92,19 @@
             <div class="header-actions">
                 <button class="btn-secondary" onclick="fetchFromGit()" style="padding: 10px 16px; font-size: 14px;">⬇️ Fetch Data</button>
                 <div style="display: flex; flex-direction: column; gap: 4px;">
-                    <input type="date" id="filter-date" class="date-filter" onchange="handleDateSelection()">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <select id="range-select" class="date-filter" onchange="handleRangeSelect()" style="padding: 8px;">
+                            <option value="">Select range</option>
+                            <option value="today">Today</option>
+                            <option value="yesterday">Yesterday</option>
+                            <option value="7">Last 7 days</option>
+                            <option value="30">Last 30 days</option>
+                            <option value="90">Last 90 days</option>
+                            <option value="all">All time</option>
+                        </select>
+                    </div>
                 </div>
                 <input type="text" id="filter-food" class="date-filter" placeholder="Search food..." oninput="filterHistory()" style="width: 150px;">
-                <button class="btn-secondary" onclick="clearFilters()" style="padding: 10px 20px;">✕ Clear</button>
                 <button id="history-select-mode-btn" class="btn-secondary" onclick="toggleHistorySelectMode()" style="padding: 10px 16px; font-size: 14px;">☑️ Select</button>
             </div>
         </div>
@@ -231,9 +243,11 @@
             <div class="modal-body">
                 <div id="csv-input-section">
                     <p style="color: var(--text-secondary); margin-bottom: 12px;">Paste your CSV data below. Expected format:</p>
-                    <pre style="background: var(--bg); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-secondary);">Date,Time,Food,Calories,Prot (g),Carb (g),Fat (g)
-2026-01-15,9:00 AM,Eggs (2 whole + 2 whites),220,20.0,2.0,10.0
+                    <div style="display: flex; gap: 8px; align-items: flex-start;">
+                        <pre id="example-csv" style="background: var(--bg); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-secondary);">2026-01-15,9:00 AM,Eggs (2 whole + 2 whites),220,20.0,2.0,10.0
 2026-01-15,,Korean BBQ noodles (90 g),289,7.4,37.4,12.2</pre>
+                        <button class="btn-secondary" style="height: 40px; margin-top: 8px;" onclick="copyExampleCsv()">📋 Copy</button>
+                    </div>
                     <textarea id="csv-input" placeholder="Paste CSV data here..." style="width: 100%; height: 200px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 13px; margin: 12px 0;"></textarea>
                     <button class="btn-primary" onclick="parseCsv()" style="width: 100%;">🔍 Parse & Preview</button>
                 </div>
