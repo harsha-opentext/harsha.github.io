@@ -1,0 +1,241 @@
+:root{
+  --bg: #f4f7f6;
+  --card: #ffffff;
+  --muted: #8e8e93;
+  --text: #1c1c1e;
+  --text-secondary: #8e8e93;
+  --danger: #ff3b30;
+  --border: #e6e6ea;
+  --primary: #007aff;
+  --shadow: 0 12px 30px rgba(16,24,40,0.06);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial;background:var(--bg);color:var(--text);padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+
+.header{background:var(--card);padding:18px 20px;display:flex;align-items:center;justify-content:space-between;box-shadow:var(--shadow);max-width:1200px;margin:0 auto}
+.header{padding-top:calc(18px + env(safe-area-inset-top));}
+.header h1{font-size:22px;margin:0}
+.header p{margin:0;color:var(--muted);font-size:13px}
+
+/* header action layout (new / search / fetch / push) */
+.header-actions{display:flex;align-items:center;gap:10px}
+.header .search{width:220px;display:flex;align-items:center}
+.header .search input{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:#fff;outline:none}
+.header-actions .action-btn.small{padding:8px 10px;font-size:14px;height:38px;border-radius:8px}
+.header-actions .action-btn.ghost{background:transparent;color:var(--text);border:1px solid var(--border)}
+
+@media(max-width:900px){
+  .header .search{width:160px}
+}
+@media(max-width:640px){
+  .header-actions{gap:8px}
+  .header .search{display:none}
+}
+
+.app-wrap{display:flex;gap:16px;min-height:calc(100vh - 140px);padding:18px}
+.app-wrap{max-width:1200px;margin:0 auto}
+.sidebar{width:300px;background:var(--card);border-radius:12px;padding:12px;border:1px solid var(--border);box-shadow:var(--shadow);display:flex;flex-direction:column}
+.search{display:flex;align-items:center;gap:8px;padding:8px;border-radius:10px;border:1px solid var(--border);background:#fafafa}
+.search input{border:0;background:transparent;outline:none;width:100%}
+.notes-list{margin-top:10px;display:flex;flex-direction:column;gap:8px;overflow:auto}
+.notes-list li{list-style:none}
+.note-item{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:10px;background:#fff;cursor:pointer;border:1px solid transparent}
+.note-item:hover{background:#fbfbff}
+.note-item.active{background:#eef5ff;border-color:rgba(0,122,255,0.08)}
+.note-meta{display:flex;flex-direction:column}
+.note-title{font-weight:600}
+.note-sub{font-size:12px;color:var(--muted)}
+.note-menu-btn{background:transparent;border:0;font-size:18px;color:var(--muted);cursor:pointer}
+
+/* popup menu for note actions */
+.note-menu-popup{position:absolute;background:var(--card);border:1px solid var(--border);box-shadow:var(--shadow);padding:8px;border-radius:8px;z-index:9999;display:flex;flex-direction:column;gap:6px}
+.note-menu-item{background:transparent;border:0;padding:8px 10px;border-radius:6px;text-align:left;cursor:pointer;font-weight:600}
+.note-menu-item:hover{background:#f6f7fb}
+
+.main{flex:1;display:flex;flex-direction:column;gap:12px}
+.editor-top{display:flex;align-items:center;gap:12px}
+.editor-top input{flex:1;padding:10px;border-radius:10px;border:1px solid var(--border);background:#fff}
+.editor-actions{display:flex;gap:10px;align-items:center}
+.action-btn{background:var(--primary);color:#fff;border:0;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.action-btn.ghost{background:#fff;color:var(--text);border:1px solid var(--border)}
+.action-btn.small{padding:8px 12px;font-size:14px}
+#btn-save{background:var(--primary);color:#fff}
+
+.editor{display:flex;gap:16px;align-items:flex-start}
+.editor textarea{flex:1;min-height:480px;border-radius:12px;border:1px solid var(--border);padding:18px;font-size:15px;background:#fff;color:var(--text);resize:vertical}
+.preview{width:420px;max-width:38%;background:var(--card);border-radius:12px;padding:18px;box-shadow:var(--shadow);overflow:auto}
+.preview{position:relative}
+.preview.hidden{display:none}
+
+.editor.morphed textarea{ display: none !important; }
+.editor.morphed .preview{ width: 100% !important; max-width: 100% !important; box-shadow: none; border-radius:12px; }
+.editor.morphed .preview{ width: 100% !important; max-width: 100% !important; box-shadow: none; border-radius:12px; }
+
+/* When preview is shown in 'morph' mode, overlay it without affecting overall layout */
+.editor.preview-overlay{ position: relative; }
+.editor.preview-overlay textarea{ opacity: 0.35; }
+.editor.preview-overlay .preview{ position: fixed; right: 24px; width: 420px; max-width: 40%; z-index: 220; box-shadow: var(--shadow); border-left: 1px solid var(--border); background: var(--card); overflow:auto; transition: transform 220ms ease, opacity 160ms ease; border-radius: 10px; }
+
+@media(max-width:900px){
+  .editor.preview-overlay .preview{ position: fixed; left: 12px; right: 12px; width: auto; max-width: 100%; height: 60vh; bottom: auto; border-left: none; border-top: 1px solid var(--border); }
+  .editor.preview-overlay textarea{ opacity: 0.85; }
+}
+
+
+/* Pages follow tracker styling: centered, full-page panels with bottom padding for nav */
+.page{display:none;padding:20px;padding-bottom:calc(80px + env(safe-area-inset-bottom));max-width:1200px;margin:0 auto;min-height:100vh;overflow:auto}
+.page{display:none;padding:20px;padding-bottom:calc(120px + env(safe-area-inset-bottom));max-width:1200px;margin:0 auto;min-height:100vh;overflow:auto}
+.page-header{display:flex;flex-direction:column;gap:12px;margin-bottom:20px}
+.page-header h1{font-size:28px;margin:0}
+.settings-section{background:var(--card);border-radius:12px;padding:20px;margin-bottom:16px;border:1px solid var(--border);box-shadow:var(--shadow);max-width:980px}
+.settings-section:last-of-type{margin-bottom:28px}
+.settings-section h3{margin:0 0 8px 0}
+.form-group{margin-bottom:16px}
+.form-input{display:block;width:100%;padding:12px;border-radius:10px;border:1px solid var(--border);background:#fff;font-size:16px;min-height:44px}
+
+/* Buttons (tracker-like) */
+.btn-primary{background:var(--primary);color:#fff;border:0;padding:12px 18px;border-radius:10px;font-weight:700;cursor:pointer}
+.btn-secondary{background:#fff;color:var(--text);border:1px solid var(--border);padding:10px 14px;border-radius:10px;cursor:pointer}
+.btn-danger{background:var(--danger);color:#fff;border:0;padding:12px 14px;border-radius:10px;cursor:pointer}
+
+/* labels and form helpers */
+.form-group label{display:block;margin-bottom:8px;font-weight:600;color:var(--text);font-size:14px}
+
+/* Buttons base min height for touch */
+button{min-height:44px}
+
+#status-box{position:fixed;right:18px;top:18px;background:rgba(0,0,0,0.85);color:#fff;padding:8px 12px;border-radius:10px;font-size:13px;z-index:120000;display:none;min-width:120px;max-width:300px}
+
+/* Ensure common card elements don't overflow the header area */
+.settings-section, .preview, .sidebar, .form-panel { max-width: 100%; box-sizing: border-box }
+
+.bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(60px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--card);
+  box-shadow: 0 -2px 10px rgba(0,0,0,0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  z-index: 120000;
+}
+.bottom-nav{transition: transform 240ms ease, opacity 180ms ease;}
+.bottom-nav.hidden{transform: translateY(120%); opacity: 0; pointer-events: none}
+.bottom-nav .nav-links{max-width:900px;display:flex;gap:8px;width:100%;justify-content:space-around;padding:0 12px}
+.bottom-nav .nav-btn{
+  background: none;
+  border: none;
+  padding: 6px 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-secondary);
+  transition: all 0.15s;
+  border-top: 3px solid transparent;
+  min-height: 60px;
+  justify-content: center;
+  flex: 1;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+.bottom-nav .nav-btn .icon{font-size:20px}
+.bottom-nav .nav-btn .label{font-size:12px;font-weight:600}
+.bottom-nav .nav-btn:active{background:rgba(0,122,255,0.05);transform:scale(0.98)}
+.bottom-nav .nav-btn.active{color:var(--primary);border-top-color:var(--primary);background:rgba(0,122,255,0.03)}
+/* slight rounding for nav-links container to match tracker */
+.bottom-nav .nav-links{border-radius:12px}
+
+@media(max-width:900px){.sidebar{width:240px}.preview{display:none}}
+@media(max-width:640px){.app-wrap{flex-direction:column}.sidebar{width:100%;border-radius:10px}.editor{flex-direction:column}.preview{width:100%;max-width:100%}.editor textarea{min-height:320px}}
+
+/* Mobile / iPhone Safari specific optimizations */
+@supports (padding: max(0px)) {
+  :root { --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom); }
+}
+
+@media (max-width: 640px) {
+  .header h1{font-size:20px}
+  .header-actions .action-btn.small{height:44px;padding:10px 12px}
+  .note-item{padding:12px}
+  .editor textarea{padding:14px;font-size:16px}
+  .bottom-nav{left:0;right:0;bottom:0;height:calc(60px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);border-radius:0}
+  .bottom-nav .nav-links{padding:0 8px}
+  .bottom-nav .nav-btn{padding:8px 6px}
+  .preview{display:none}
+  /* make tap targets larger in lists */
+  .notes-list li{padding:6px 0}
+  .note-item{min-height:56px}
+}
+
+button:focus{outline:none}
+
+/* end */
+
+/* Logging panel as a right-side sliding drawer */
+#log-drawer-backdrop{ position: fixed; inset: 0; background: rgba(0,0,0,0.32); z-index: 129990; opacity: 0; pointer-events: none; transition: opacity 200ms ease; }
+#log-drawer-backdrop.open{ opacity: 1; pointer-events: auto; }
+
+#log-panel{ position: fixed; right: 0; top: 0; bottom: 0; width: 380px; max-width: 92vw; background: var(--card); box-shadow: -12px 0 30px rgba(16,24,40,0.12); border-left:1px solid var(--border); z-index: 130000; transform: translateX(100%); transition: transform 260ms cubic-bezier(.2,.9,.2,1); display:flex; flex-direction:column; }
+#log-panel.open{ transform: translateX(0%); }
+
+.log-panel-inner{ display:flex; flex-direction:column; height:100%; }
+.log-panel-header{ display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid var(--border); font-weight:700; }
+.log-controls{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; overflow:auto; max-width:100%; }
+.log-screen{ padding:12px; overflow:auto; flex:1; background: transparent; }
+.log-item{ padding:8px; border-radius:6px; margin-bottom:8px; background: #f7f9fa; font-size:13px; color:var(--text-secondary); white-space:pre-wrap; }
+.log-error{ background: #ffe6e6; color: #8b1e1e; }
+.log-warn{ background: #fff5e6; color: #8a5a00; }
+.log-debug{ background: #eef8ff; color: #0a4b75; }
+
+#page-bottom-spacer{ background: transparent; }
+
+/* Reduce button sizes inside the log drawer so they fit on small screens */
+#log-panel .btn-secondary, #log-panel .btn-danger, #log-panel .btn-primary {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+#log-panel select { min-width: 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; background: #fff; border:1px solid var(--border); padding: 6px 10px; border-radius:8px; font-size:13px; color:var(--text); }
+
+/* add a small caret using background image for native select look */
+#log-panel select { background-image: linear-gradient(45deg, transparent 50%, var(--text) 50%), linear-gradient(135deg, var(--text) 50%, transparent 50%); background-position: calc(100% - 14px) calc(50% - 3px), calc(100% - 8px) calc(50% - 3px); background-size: 6px 6px, 6px 6px; background-repeat: no-repeat; padding-right: 28px; }
+
+/* Floating non-blocking confirm/prompt panels */
+#floating-ui-root{ position: fixed; top: 18px; right: 18px; z-index: 140000; display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
+
+/* Floating preview root used when rendering in morph mode */
+#floating-preview-root{ position: fixed; inset: 0; pointer-events: none; z-index: 220; }
+.floating-preview{ pointer-events: auto; box-sizing: border-box; border-radius: 10px; overflow: auto; background: var(--card); }
+.floating-panel{ min-width:260px; max-width:380px; background:var(--card); border:1px solid var(--border); box-shadow:0 8px 28px rgba(0,0,0,0.12); padding:12px; border-radius:10px; color:var(--text); }
+.floating-panel .confirm-msg, .floating-panel .prompt-msg{ font-weight:600; margin-bottom:8px; }
+.floating-panel .confirm-actions{ display:flex; gap:8px; justify-content:flex-end; }
+.floating-panel .btn{ min-height:36px; padding:8px 12px; border-radius:8px; border:0; cursor:pointer; }
+.floating-panel .btn-cancel{ background:#fff; border:1px solid var(--border); color:var(--text); }
+.floating-panel .btn-ok{ background:var(--primary); color:#fff; }
+.floating-panel .prompt-input{ width:100%; padding:8px 10px; margin-bottom:8px; border-radius:8px; border:1px solid var(--border); }
+
+/* Fullscreen mode for editor and preview */
+.editor.fullscreen, .preview.fullscreen { position: fixed; z-index: 150000; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; padding: 24px; display: flex; align-items: stretch; background: var(--bg); }
+.editor.fullscreen textarea { flex: 1; height: 100%; min-height: 0; border-radius: 12px; box-shadow: none; }
+.preview.fullscreen { padding: 32px; overflow: auto; box-shadow: none; background: white; }
+.preview.fullscreen .floating-preview-inner { max-width: 100%; }
+
+/* Fullscreen toggle button positioned bottom-right inside editor/preview */
+.fullscreen-toggle { position: absolute; right: 12px; bottom: 12px; z-index: 151000; background: rgba(0,0,0,0.6); color: #fff; border: 0; padding: 8px 10px; border-radius: 10px; cursor: pointer; font-weight:700; display: inline-flex; align-items: center; gap:8px; }
+.fullscreen-toggle.small { padding:6px 8px; font-size:13px }
+
+/* When editor is not positioned relative, ensure container is positioned so button anchors correctly */
+.editor { position: relative; }
+
+/* In fullscreen, hide bottom nav to avoid overlap */
+.editor.fullscreen ~ .bottom-nav, .preview.fullscreen ~ .bottom-nav, body.has-fullscreen .bottom-nav { display: none !important; }
+.has-fullscreen .bottom-nav { display: none !important; }
+

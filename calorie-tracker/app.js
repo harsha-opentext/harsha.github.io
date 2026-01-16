@@ -198,6 +198,87 @@ function render() {
     }
 
     totalEl.innerText = `${total} ${totalField || 'total'}`;
+    // Update budget UI after recalculating total
+    try { updateBudgetUI(total); } catch (e) {}
+}
+
+function updateBudgetUI(todayTotal) {
+    const budget = parseInt(getConfig('dailyBudget') || 0, 10) || 0;
+    // Calculate total if not passed
+    let total = 0;
+    if (typeof todayTotal === 'number') {
+        total = todayTotal;
+    } else {
+        total = state.entries.reduce((s, e) => {
+            if (!isTodayEntry(e)) return s;
+            const c = parseFloat(e.calories);
+            return s + (isNaN(c) ? 0 : c);
+        }, 0);
+    }
+    const pct = budget > 0 ? Math.min(100, Math.round((total / budget) * 100)) : 0;
+    dbg(`Budget UI: total=${total} budget=${budget} pct=${pct}%`, 'debug');
+    const fill = document.getElementById('budget-bar-fill');
+    const vals = document.getElementById('budget-values');
+    if (fill) fill.style.width = pct + '%';
+    if (vals) vals.textContent = `${Math.round(total)} / ${budget} kcal`;
+    // Color warning if over budget
+    if (fill) {
+        if (total > budget) {
+            fill.style.background = 'linear-gradient(90deg, #ff3b30 0%, #ff7b7b 100%)';
+        } else {
+            fill.style.background = 'linear-gradient(90deg, #34c759 0%, #ffd60a 60%, #ff3b30 100%)';
+        }
+    }
+}
+
+async function saveBudgetToRepo() {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) {
+        alert('Missing GitHub credentials. Configure in Settings first.');
+        showPage('settings');
+        return;
+    }
+
+    const budgetInput = document.getElementById('cfg-daily-budget');
+    const budget = budgetInput ? parseInt(budgetInput.value, 10) : getConfig('dailyBudget');
+    if (isNaN(budget) || budget <= 0) {
+        alert('Please enter a valid daily budget value before saving to repo.');
+        return;
+    }
+
+    const dataFile = 'budget.json';
+    const url = `https://api.github.com/repos/${repo}/contents/${dataFile}`;
+    const body = {
+        message: `Budget: ${new Date().toISOString()}`,
+        content: btoa(unescape(encodeURIComponent(JSON.stringify({ dailyBudget: budget }, null, 2))))
+    };
+
+    // Try to fetch existing file to include SHA
+    try {
+        const getRes = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+        if (getRes.ok) {
+            const j = await getRes.json();
+            if (j.sha) body.sha = j.sha;
+        }
+    } catch (e) { /* ignore */ }
+
+    try {
+        const res = await fetch(url, { method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (res.ok) {
+            const json = await res.json();
+            setConfig('dailyBudget', budget);
+            showNotification('Budget saved to repo ✅');
+            dbg('Budget saved to GitHub', 'info');
+        } else {
+            const err = await res.json();
+            dbg('Failed to save budget: ' + (err.message || res.statusText), 'error', err);
+            alert('Failed to save budget to repo. Check logs.');
+        }
+    } catch (err) {
+        dbg('Save budget error: ' + err.message, 'error');
+        alert('Error saving budget to repo. Check logs.');
+    }
 }
 
 // Debug helper: dump entry matching info (only when debug enabled)
@@ -538,7 +619,7 @@ function renderFormFields() {
             input.type = field.type;
             input.id = `field-${field.name}`;
             input.placeholder = field.placeholder || field.label;
-            
+
             if (field.type === 'date' && field.default === 'today') {
                 input.value = new Date().toISOString().split('T')[0];
             }
@@ -548,7 +629,25 @@ function renderFormFields() {
         
         if (field.required) input.required = true;
         
-        wrapper.appendChild(input);
+        // If this is the time field, add a time-picker helper button
+        if (field.name === 'time') {
+            const timeWrap = document.createElement('div');
+            timeWrap.style.display = 'flex';
+            timeWrap.style.gap = '8px';
+            timeWrap.appendChild(input);
+
+            const pickerBtn = document.createElement('button');
+            pickerBtn.type = 'button';
+            pickerBtn.className = 'btn-secondary';
+            pickerBtn.style.padding = '8px 10px';
+            pickerBtn.textContent = '⏱️';
+            pickerBtn.onclick = () => openTimePicker(input.id);
+            timeWrap.appendChild(pickerBtn);
+
+            wrapper.appendChild(timeWrap);
+        } else {
+            wrapper.appendChild(input);
+        }
         container.appendChild(wrapper);
     });
     
@@ -589,7 +688,24 @@ function renderFormFields() {
         input.placeholder = field.label;
         input.min = field.min || 0;
         
-        wrapper.appendChild(input);
+        // If this is the `time` field, add a small picker button next to the input
+        if (field.name === 'time') {
+            const timeWrap = document.createElement('div');
+            timeWrap.style.cssText = 'display:flex; gap:8px; align-items:center;';
+            timeWrap.appendChild(input);
+
+            const tpBtn = document.createElement('button');
+            tpBtn.type = 'button';
+            tpBtn.className = 'btn-secondary';
+            tpBtn.style.cssText = 'padding:8px 10px;';
+            tpBtn.textContent = '⏰';
+            tpBtn.onclick = () => openTimePicker(input.id);
+            timeWrap.appendChild(tpBtn);
+
+            wrapper.appendChild(timeWrap);
+        } else {
+            wrapper.appendChild(input);
+        }
         macroSection.appendChild(wrapper);
     });
     
@@ -675,10 +791,13 @@ function saveSettings() {
     const r = document.getElementById('cfg-repo').value.trim();
     const autoSaveCheckbox = document.getElementById('cfg-autosave');
     const autoSave = autoSaveCheckbox ? autoSaveCheckbox.checked : false;
+    const dailyBudgetInput = document.getElementById('cfg-daily-budget');
+    const dailyBudget = dailyBudgetInput ? parseInt(dailyBudgetInput.value, 10) : null;
     
     localStorage.setItem('gt_token', t);
     localStorage.setItem('gt_repo', r);
     setConfig('autoSave', autoSave);
+    if (!isNaN(dailyBudget) && dailyBudget > 0) setConfig('dailyBudget', dailyBudget);
     
     updateAutoSaveUI();
     dbg("Settings saved");
@@ -727,7 +846,9 @@ async function fetchFromGit() {
 
     if (!token || !repo) {
         dbg("Missing credentials - skipping GitHub fetch (no cache)", "warn");
-        // No credentials and no cache: do not load local files. Leave entries as-is.
+        alert('Missing GitHub credentials. Open Settings and configure your token and repo first.');
+        // Open settings page for easy configuration
+        try { showPage('settings'); } catch (e) { /* ignore */ }
         return;
     }
 
@@ -740,6 +861,9 @@ async function fetchFromGit() {
     dbg(`URL: ${url}`, 'debug');
 
     try {
+        // Optional: show a small loading marker on the first fetch button
+        const activeBtn = document.querySelector('[onclick="fetchFromGit()"]');
+        if (activeBtn) activeBtn.classList.add('loading');
         const response = await fetch(url, {
             method: 'GET',
             headers: { 
@@ -777,6 +901,10 @@ async function fetchFromGit() {
     } catch (err) {
         dbg(`Fetch error: ${err.message}`, "error");
         dbg(`Stack trace: ${err.stack}`, 'debug');
+    }
+    finally {
+        const activeBtn = document.querySelector('[onclick="fetchFromGit()"]');
+        if (activeBtn) activeBtn.classList.remove('loading');
     }
 }
 
@@ -1382,6 +1510,7 @@ function historyBulkDelete() {
     renderHistory();
     
     dbg(`Bulk deleted ${indices.length} entries from history`, 'info');
+    try { if (getConfig('autoSave')) autoSave(); } catch (e) {}
     toggleHistorySelectMode();
 }
 
@@ -1502,13 +1631,20 @@ function saveEdit(index) {
     render();
     renderHistory();
     dbg(`Entry ${index} updated`, 'info');
+    // Mark as changed and auto-save if configured
+    state.hasUnsavedChanges = true;
+    try {
+        if (getConfig('autoSave')) autoSave();
+    } catch (e) {}
 }
 
 function deleteEntryGlobal(index) {
     if (confirm('Delete this entry?')) {
         state.entries.splice(index, 1);
+        state.hasUnsavedChanges = true;
         render();
         renderHistory();
+        try { if (getConfig('autoSave')) autoSave(); } catch (e) {}
     }
 }
 
@@ -1793,6 +1929,15 @@ window.onload = async () => {
     }
     // Update UI to reflect autosave state (adds icons to publish buttons)
     updateAutoSaveUI();
+
+    // Restore daily budget input
+    const budgetInput = document.getElementById('cfg-daily-budget');
+    if (budgetInput) {
+        try {
+            const b = getConfig('dailyBudget');
+            if (b) budgetInput.value = b;
+        } catch (e) { /* ignore */ }
+    }
     
     // Load schema first
     const schemaLoaded = await loadSchema();
@@ -1814,6 +1959,7 @@ window.onload = async () => {
     // Ensure date button and tracker render initialize even if no fetch occurs
     try {
         updateDateButton();
+        updateBudgetUI();
         render();
     } catch (e) { /* ignore if DOM not ready */ }
 
@@ -2078,30 +2224,137 @@ function displayCsvPreview() {
     
     csvParsedData.forEach((entry, idx) => {
         const card = document.createElement('div');
-        card.style.cssText = 'background: var(--card-bg); padding: 16px; border-radius: 12px; margin-bottom: 10px; box-shadow: var(--shadow); border-left: 4px solid var(--primary);';
-        
-        let macroStr = '';
-        if (entry.protein || entry.carbs || entry.fat) {
-            const macros = [];
-            if (entry.protein) macros.push(`<span style="color: var(--primary);">P: ${entry.protein}g</span>`);
-            if (entry.carbs) macros.push(`<span style="color: var(--secondary);">C: ${entry.carbs}g</span>`);
-            if (entry.fat) macros.push(`<span style="color: var(--success);">F: ${entry.fat}g</span>`);
-            macroStr = `<div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">${macros.join(' • ')}</div>`;
-        }
-        
-        card.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div style="flex: 1;">
-                    <div style="font-weight: 600; font-size: 16px; color: var(--text); margin-bottom: 6px;">${entry.food}</div>
-                    <div style="font-weight: 600; font-size: 18px; color: var(--primary); margin-bottom: 4px;">${entry.calories} kcal</div>
-                    <div style="font-size: 13px; color: var(--text-secondary);">
-                        <span style="margin-right: 12px;">📅 ${entry.date}</span>
-                        <span>🕐 ${entry.time}</span>
-                    </div>
-                    ${macroStr}
-                </div>
-            </div>
-        `;
+        card.style.cssText = 'background: var(--card-bg); padding: 12px; border-radius: 12px; margin-bottom: 10px; box-shadow: var(--shadow); border-left: 4px solid var(--primary); display: flex; gap: 12px; align-items: center;';
+
+        // Build editable fields for each parsed entry so user can adjust before import
+        const left = document.createElement('div');
+        left.style.flex = '1';
+
+        const foodInput = document.createElement('input');
+        foodInput.type = 'text';
+        foodInput.value = entry.food || '';
+        foodInput.placeholder = 'Food';
+        foodInput.style.cssText = 'width:100%; padding:8px; font-size:14px; margin-bottom:6px;';
+
+        const caloriesInput = document.createElement('input');
+        caloriesInput.type = 'number';
+        caloriesInput.value = entry.calories || 0;
+        caloriesInput.placeholder = 'Calories';
+        caloriesInput.style.cssText = 'width:140px; padding:8px; font-size:14px; margin-right:8px;';
+
+        const dateInput = document.createElement('input');
+        dateInput.type = 'date';
+        try {
+            const parsed = new Date(entry.date);
+            if (!isNaN(parsed.getTime())) dateInput.value = parsed.toISOString().split('T')[0];
+        } catch (e) {}
+        dateInput.style.cssText = 'padding:8px; font-size:14px; margin-right:8px;';
+
+        const timeInput = document.createElement('input');
+        timeInput.type = 'time';
+        try {
+            const t = entry.time;
+            if (t && t !== 'Current Time') {
+                const parsed = Date.parse(`1970-01-01 ${t}`);
+                if (!isNaN(parsed)) {
+                    const d2 = new Date(parsed);
+                    timeInput.value = d2.toTimeString().slice(0,5);
+                }
+            }
+        } catch (e) {}
+        timeInput.style.cssText = 'padding:8px; font-size:14px;';
+
+        const macroRow = document.createElement('div');
+        macroRow.style.cssText = 'margin-top:8px; display:flex; gap:8px; align-items:center;';
+
+        const proteinInput = document.createElement('input');
+        proteinInput.type = 'number';
+        proteinInput.value = entry.protein || '';
+        proteinInput.placeholder = 'P (g)';
+        proteinInput.style.cssText = 'width:80px; padding:8px; font-size:13px;';
+
+        const carbsInput = document.createElement('input');
+        carbsInput.type = 'number';
+        carbsInput.value = entry.carbs || '';
+        carbsInput.placeholder = 'C (g)';
+        carbsInput.style.cssText = 'width:80px; padding:8px; font-size:13px;';
+
+        const fatInput = document.createElement('input');
+        fatInput.type = 'number';
+        fatInput.value = entry.fat || '';
+        fatInput.placeholder = 'F (g)';
+        fatInput.style.cssText = 'width:80px; padding:8px; font-size:13px;';
+
+        macroRow.appendChild(proteinInput);
+        macroRow.appendChild(carbsInput);
+        macroRow.appendChild(fatInput);
+
+        left.appendChild(foodInput);
+
+        const row2 = document.createElement('div');
+        row2.style.cssText = 'display:flex; gap:8px; align-items:center; margin-top:6px;';
+        row2.appendChild(caloriesInput);
+        row2.appendChild(dateInput);
+        row2.appendChild(timeInput);
+        left.appendChild(row2);
+        left.appendChild(macroRow);
+
+        // Right actions: remove or reset
+        const right = document.createElement('div');
+        right.style.cssText = 'display:flex; flex-direction:column; gap:8px; align-items:flex-end;';
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'btn-secondary';
+        removeBtn.textContent = 'Remove';
+        removeBtn.onclick = () => {
+            csvParsedData.splice(idx, 1);
+            displayCsvPreview();
+        };
+
+        const resetBtn = document.createElement('button');
+        resetBtn.className = 'btn-primary';
+        resetBtn.style.padding = '8px 12px';
+        resetBtn.textContent = 'Reset';
+        resetBtn.onclick = () => {
+            foodInput.value = entry.food || '';
+            caloriesInput.value = entry.calories || '';
+            try { dateInput.value = new Date(entry.date).toISOString().split('T')[0]; } catch (e) {}
+            timeInput.value = '';
+            proteinInput.value = entry.protein || '';
+            carbsInput.value = entry.carbs || '';
+            fatInput.value = entry.fat || '';
+        };
+
+        right.appendChild(removeBtn);
+        right.appendChild(resetBtn);
+
+        card.appendChild(left);
+        card.appendChild(right);
+
+        // Store inputs back into csvParsedData on any change
+        const commitChanges = () => {
+            const updated = {
+                food: foodInput.value.trim(),
+                calories: parseFloat(caloriesInput.value) || 0,
+                date: dateInput.value || entry.date,
+                time: timeInput.value ? timeInput.value : entry.time,
+            };
+            const p = parseFloat(proteinInput.value);
+            if (!isNaN(p)) updated.protein = p; else delete updated.protein;
+            const c = parseFloat(carbsInput.value);
+            if (!isNaN(c)) updated.carbs = c; else delete updated.carbs;
+            const f = parseFloat(fatInput.value);
+            if (!isNaN(f)) updated.fat = f; else delete updated.fat;
+
+            csvParsedData[idx] = { ...entry, ...updated };
+            document.getElementById('csv-count').textContent = csvParsedData.length;
+        };
+
+        [foodInput, caloriesInput, dateInput, timeInput, proteinInput, carbsInput, fatInput].forEach(inp => {
+            inp.addEventListener('change', commitChanges);
+            inp.addEventListener('input', commitChanges);
+        });
+
         list.appendChild(card);
     });
     
@@ -2120,17 +2373,92 @@ function backToCsvInput() {
     previewSection.style.display = 'none';
 }
 
-function importCsvEntries() {
+// --- Time Picker Modal (iPhone-like) ---
+let timePickerTargetId = null;
+function populateTimePicker() {
+    const hr = document.getElementById('tp-hour');
+    const min = document.getElementById('tp-minute');
+    if (!hr || !min) return;
+    if (hr.children.length === 0) {
+        for (let h = 0; h < 24; h++) {
+            const o = document.createElement('option');
+            o.value = String(h).padStart(2, '0');
+            o.textContent = String(h % 12 === 0 ? 12 : h % 12).padStart(2, '0') + (h < 12 ? ' AM' : ' PM');
+            hr.appendChild(o);
+        }
+    }
+    if (min.children.length === 0) {
+        for (let m = 0; m < 60; m += 1) {
+            const o = document.createElement('option');
+            o.value = String(m).padStart(2, '0');
+            o.textContent = String(m).padStart(2, '0');
+            min.appendChild(o);
+        }
+    }
+}
+
+function openTimePicker(targetInputId) {
+    populateTimePicker();
+    timePickerTargetId = targetInputId;
+    const modal = document.getElementById('time-picker-modal');
+    const input = document.getElementById(targetInputId);
+    if (input && input.value) {
+        const v = input.value; // expects HH:MM
+        const parts = v.split(':');
+        if (parts.length === 2) {
+            const hr = document.getElementById('tp-hour');
+            const min = document.getElementById('tp-minute');
+            hr.value = parts[0];
+            min.value = parts[1];
+        }
+    }
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeTimePicker() {
+    const modal = document.getElementById('time-picker-modal');
+    if (modal) modal.style.display = 'none';
+    timePickerTargetId = null;
+}
+
+function confirmTimePicker() {
+    if (!timePickerTargetId) return closeTimePicker();
+    const hr = document.getElementById('tp-hour');
+    const min = document.getElementById('tp-minute');
+    if (!hr || !min) return closeTimePicker();
+    const value = `${hr.value}:${min.value}`;
+    const input = document.getElementById(timePickerTargetId);
+    if (input) {
+        input.value = value;
+        input.dispatchEvent(new Event('input'));
+        input.dispatchEvent(new Event('change'));
+    }
+    closeTimePicker();
+}
+
+async function importCsvEntries() {
     if (csvParsedData.length === 0) return;
     
     // Add all parsed entries
     state.entries.push(...csvParsedData);
     state.hasUnsavedChanges = true;
-    
+
     render();
     renderHistory();
-    
+
     dbg(`Imported ${csvParsedData.length} entries`, 'info');
-    
+
+    // Auto-save behavior: if user has enabled autoSave in config, push to GitHub now
+    try {
+        const autoSaveEnabled = getConfig('autoSave');
+        if (autoSaveEnabled) {
+            dbg('Auto-save enabled: pushing imported CSV to GitHub', 'info');
+            // pushToGit may show its own UI; await it if possible
+            await pushToGit();
+        }
+    } catch (e) {
+        dbg(`Auto-save push failed: ${e.message}`, 'error');
+    }
+
     closeCsvImport();
 }

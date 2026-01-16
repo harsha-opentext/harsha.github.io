@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>NoteMD</title>
+  <link rel="stylesheet" href="styles.css">
+  
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="logger.js"></script>
+  <script src="config.js"></script>
+  <script defer src="app.js"></script>
+</head>
+  <body>
+  <div class="header">
+    <div>
+      <h1>NoteMD</h1>
+      <p>Markdown-first notetaker</p>
+    </div>
+
+<!-- Log panel (hidden by default) with backdrop drawer -->
+<div id="log-drawer-backdrop" aria-hidden="true"></div>
+<div id="log-panel" aria-hidden="true" class="">
+  <div class="log-panel-inner">
+    <div class="log-panel-header">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="font-weight:700">Logs</div>
+        <div class="log-controls">
+          <select id="log-level">
+          <option value="debug">Debug</option>
+          <option value="info" selected>Info</option>
+          <option value="warn">Warn</option>
+          <option value="error">Error</option>
+        </select>
+        <select id="log-retention">
+          <option value="0">Keep All</option>
+          <option value="5">5 min</option>
+          <option value="15">15 min</option>
+          <option value="60">1 hour</option>
+        </select>
+        <button id="btn-copy-logs" class="btn-secondary">Copy</button>
+        <button id="btn-save-logs" class="btn-secondary">Save</button>
+          <button id="btn-clear-logs" class="btn-danger">Clear</button>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button id="btn-close-logs" class="btn-secondary" onclick="toggleLogs()">Close</button>
+      </div>
+    </div>
+    <div id="log-screen" class="log-screen"></div>
+  </div>
+</div>
+    <div class="header-actions">
+      <button id="btn-new" class="action-btn small">New</button>
+      <div class="search"><input id="search" placeholder="Search notes"></div>
+      <button id="btn-fetch" class="action-btn small ghost">⬇️ Fetch</button>
+      <button id="btn-push" class="action-btn small">📤 Push</button>
+    </div>
+  </div>
+
+  <div class="app-wrap">
+    <aside class="sidebar">
+      <div class="notes-list" style="margin-top:8px"><ul id="notes-list"></ul></div>
+    </aside>
+
+    <main id="page-main" class="main">
+      <div class="editor-top">
+        <input id="note-title" placeholder="Untitled" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border);background:#fff">
+        <div class="editor-actions">
+          <button id="btn-save" class="action-btn small">Save</button>
+          <button id="btn-delete" class="action-btn small ghost">Delete</button>
+          <button id="btn-render" class="action-btn small ghost">Render</button>
+          <button id="btn-edit" class="action-btn small" style="display:none;">Edit</button>
+          <button id="btn-live-render" class="action-btn small">🔴 Live</button>
+        </div>
+      </div>
+
+      <div class="editor">
+        <textarea id="note-editor" placeholder="Write markdown..."></textarea>
+        <button id="btn-fullscreen-editor" class="fullscreen-toggle" title="Toggle editor fullscreen">⤢</button>
+        <div id="note-preview" class="preview" style="display:none;">
+          <button id="btn-fullscreen-preview" class="fullscreen-toggle" title="Toggle preview fullscreen" style="display:none;">⤢</button>
+        </div>
+      </div>
+    </main>
+  </div>
+    
+    <!-- PAGE: SETTINGS (full page like tracker) -->
+    <div id="page-settings" class="page" style="display:none;">
+      <div class="page-header">
+        <h1>Settings</h1>
+        <div class="header-actions">
+          <button id="btn-fetch-git-top" class="btn-secondary">⬇️ Fetch</button>
+          <button id="btn-push-git-top" class="btn-primary">📤 Push</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>🔐 GitHub Configuration</h3>
+        <div class="form-group">
+          <label>Personal Access Token</label>
+          <input type="password" id="cfg-token" placeholder="ghp_..." class="form-input">
+        </div>
+        <div class="form-group">
+          <label>Repository Path</label>
+          <input type="text" id="cfg-repo" placeholder="username/repo-name" class="form-input">
+        </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:12px;cursor:pointer;"><input type="checkbox" id="cfg-autosave" style="width:20px;height:20px;"> <div><div style="font-weight:600;">🔄 Auto-Save</div><div style="font-size:13px;color:var(--text-secondary);">Automatically sync notes to GitHub on save</div></div></label>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:8px;"><button id="btn-save-settings" class="btn-primary">💾 Save & Connect</button><button id="btn-close-settings" class="btn-secondary">Close</button></div>
+      </div>
+
+      <div class="settings-section">
+        <h3>🔄 Data Management</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-danger" id="btn-clear-local">🗑️ Clear Local Data</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>📱 App Info</h3>
+        <p><strong>Version:</strong> 0.1.0</p>
+        <p><strong>Data Folder:</strong> <code>NoteMd/data</code></p>
+      </div>
+    </div>
+    <footer>
+      <small>NoteMD — files stored under NoteMd/data in repo</small>
+    </footer>
+
+    <div class="bottom-nav tracker-nav">
+      <div class="nav-links">
+        <button id="nav-apps" type="button" class="nav-btn nav-apps-btn" onclick="window.location.href='../index.html'">
+          <span class="icon">&#8592;</span>
+          <span class="label">Apps</span>
+        </button>
+        <button id="nav-home" type="button" class="nav-btn active" onclick="showPage('main')">
+          <span class="icon">📒</span>
+          <span class="label">Notes</span>
+        </button>
+        <button id="nav-settings" type="button" class="nav-btn" onclick="showPage('settings')">
+          <span class="icon">⚙️</span>
+          <span class="label">Settings</span>
+        </button>
+        <button id="nav-logs" type="button" class="nav-btn" onclick="toggleLogs()">
+          <span class="icon">📜</span>
+          <span class="label">Logs</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="status-box" style="display:none;position:fixed;top:24px;right:24px;z-index:9999;min-width:180px;max-width:320px;padding:12px 20px;border-radius:12px;background:#222;color:#fff;font-size:15px;box-shadow:0 2px 12px rgba(0,0,0,0.12);opacity:0.95;transition:opacity 0.3s;pointer-events:none;text-align:left;">
+      <span id="status-msg"></span>
+    </div>
+  </div>
+</body>
+</html>

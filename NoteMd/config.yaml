@@ -1,0 +1,5 @@
+app: NoteMD
+version: 1
+data_folder: data
+notes_index: index.json
+folders_file: folders.yaml
