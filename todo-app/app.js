@@ -1,3 +1,6 @@
+// --- Editing State ---
+let editingTaskId = null;
+
 // State
 let state = {
     todos: [],
@@ -6,6 +9,27 @@ let state = {
     hasUnsavedChanges: false,
     autoSyncing: false
 };
+
+// Search state
+state.searchQuery = '';
+// Fuse.js instance
+state.fuse = null;
+state.fuseOptions = {
+    keys: ['text', 'description'],
+    threshold: 0.4,
+    ignoreLocation: true,
+    includeScore: true,
+    minMatchCharLength: 1
+};
+
+function rebuildFuse() {
+    try {
+        state.fuse = new Fuse(state.todos, state.fuseOptions);
+    } catch (e) {
+        console.warn('Failed to initialize Fuse:', e);
+        state.fuse = null;
+    }
+}
 
 // Initialize
 window.onload = async () => {
@@ -28,12 +52,36 @@ window.onload = async () => {
             console.error('Failed to load backup:', e);
         }
     }
+    // Build search index from backup data
+    rebuildFuse();
     
     // Try to fetch from GitHub
     if (t && r) {
         await fetchFromGit();
     }
     
+    // Wire search input
+    const searchInput = document.getElementById('searchInput');
+    const clearBtn = document.getElementById('clearSearch');
+    if (searchInput) {
+        let searchDebounce = null;
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(() => {
+                state.searchQuery = e.target.value.trim();
+                render();
+            }, 200);
+        });
+    }
+    if (clearBtn) {
+        clearBtn.addEventListener('click', () => {
+            const si = document.getElementById('searchInput');
+            if (si) si.value = '';
+            state.searchQuery = '';
+            render();
+        });
+    }
+
     render();
 };
 
@@ -55,6 +103,8 @@ function addTodo() {
     state.hasUnsavedChanges = true;
     input.value = '';
     
+    rebuildFuse();
+    
     saveToLocalStorage();
     render();
     
@@ -64,6 +114,9 @@ function addTodo() {
     }
 }
 
+// Whenever todos are modified programmatically, call rebuildFuse
+const origPushToState = pushToGit;
+
 // Toggle Todo
 function toggleTodo(id) {
     const todo = state.todos.find(t => t.id === id);
@@ -71,6 +124,7 @@ function toggleTodo(id) {
         todo.completed = !todo.completed;
         state.hasUnsavedChanges = true;
         saveToLocalStorage();
+        rebuildFuse();
         render();
         
         // Auto-save if enabled
@@ -89,6 +143,7 @@ function deleteTodo(id) {
         state.todos = state.todos.filter(t => t.id !== id);
         state.hasUnsavedChanges = true;
         saveToLocalStorage();
+        rebuildFuse();
         render();
         
         // Auto-save if enabled
@@ -114,7 +169,17 @@ function getFilteredTodos() {
     } else if (state.filter === 'completed') {
         return state.todos.filter(t => t.completed);
     }
-    return state.todos;
+    // Apply search filtering on top of base filter
+    const base = state.todos.slice();
+    if (!state.searchQuery) return base;
+    // Use Fuse.js when available
+    if (state.fuse) {
+        const results = state.fuse.search(state.searchQuery);
+        return results.map(r => r.item);
+    }
+    // Fallback to simple substring match
+    const q = state.searchQuery.toLowerCase();
+    return base.filter(t => (t.text || '').toLowerCase().includes(q) || (t.description||'').toLowerCase().includes(q));
 }
 
 // Render
@@ -133,10 +198,13 @@ function render() {
     document.getElementById('count-completed').textContent = completed;
     document.getElementById('total-todos-count').textContent = total;
     
-    // Show empty state if no todos
+    // Show empty state if no todos after filtering/search
     if (filtered.length === 0) {
         container.style.display = 'none';
         emptyState.style.display = 'flex';
+        // Show helpful hint when search is active
+        const hint = state.searchQuery ? `No results for "${state.searchQuery}"` : 'No todos yet';
+        emptyState.querySelector('p').textContent = hint;
         return;
     }
     
@@ -144,18 +212,82 @@ function render() {
     emptyState.style.display = 'none';
     
     // Render todos
-    container.innerHTML = filtered.map(todo => `
-        <div class="todo-item ${todo.completed ? 'completed' : ''}">
-            <button class="checkbox ${todo.completed ? 'checked' : ''}" onclick="toggleTodo(${todo.id})">
-                ${todo.completed ? '✓' : ''}
-            </button>
-            <div class="todo-content">
-                <div class="todo-text">${escapeHtml(todo.text)}</div>
-                <div class="todo-date">${formatDate(todo.createdAt)}</div>
-            </div>
-            <button class="delete-btn" onclick="deleteTodo(${todo.id})">🗑️</button>
-        </div>
-    `).join('');
+    container.innerHTML = filtered.map((todo, idx) => {
+        if (editingTaskId === todo.id) {
+            return `
+                <div class="todo-item editing">
+                    <input type="text" class="edit-input" value="${escapeHtml(todo.text)}" />
+                    <div class="todo-actions">
+                        <button class="save-edit-btn" data-id="${todo.id}">💾</button>
+                        <button class="cancel-edit-btn" data-id="${todo.id}">✖️</button>
+                    </div>
+                </div>
+            `;
+        } else {
+            return `
+                <div class="todo-item ${todo.completed ? 'completed' : ''}">
+                    <button class="checkbox ${todo.completed ? 'checked' : ''}" onclick="toggleTodo(${todo.id})">
+                        ${todo.completed ? '✓' : ''}
+                    </button>
+                    <div class="todo-content">
+                        <div class="todo-text">${escapeHtml(todo.text)}</div>
+                        <div class="todo-date">${formatDate(todo.createdAt)}</div>
+                    </div>
+                    <button class="edit-btn" data-id="${todo.id}">✏️</button>
+                    <button class="delete-btn" onclick="deleteTodo(${todo.id})">🗑️</button>
+                </div>
+            `;
+        }
+    }).join('');
+
+    // Attach edit/save/cancel listeners after rendering
+    document.querySelectorAll('.edit-btn').forEach(btn => {
+        btn.onclick = (e) => {
+            const id = Number(btn.getAttribute('data-id'));
+            startEdit(id);
+        };
+    });
+    document.querySelectorAll('.save-edit-btn').forEach(btn => {
+        btn.onclick = (e) => {
+            const id = Number(btn.getAttribute('data-id'));
+            saveEdit(id);
+        };
+    });
+    document.querySelectorAll('.cancel-edit-btn').forEach(btn => {
+        btn.onclick = (e) => {
+            cancelEdit();
+        };
+    });
+// --- Edit Handlers ---
+function startEdit(id) {
+    editingTaskId = id;
+    render();
+    // Focus input
+    const input = document.querySelector('.edit-input');
+    if (input) input.focus();
+}
+
+function saveEdit(id) {
+    const input = document.querySelector('.edit-input');
+    if (!input) return;
+    const newText = input.value.trim();
+    if (!newText) return;
+    const idx = state.todos.findIndex(t => t.id === id);
+    if (idx !== -1) {
+        state.todos[idx].text = newText;
+        state.hasUnsavedChanges = true;
+        saveToLocalStorage();
+        rebuildFuse();
+        if (getConfig('autoSave')) autoSave();
+    }
+    editingTaskId = null;
+    render();
+}
+
+function cancelEdit() {
+    editingTaskId = null;
+    render();
+}
 }
 
 // GitHub Functions
@@ -184,6 +316,7 @@ async function fetchFromGit() {
             state.todos = JSON.parse(content);
             state.hasUnsavedChanges = false;
             saveToLocalStorage();
+            rebuildFuse();
             render();
             showNotification('✅ Fetched from GitHub');
         } else if (res.status === 404) {
@@ -342,6 +475,7 @@ function clearAllData() {
         state.todos = [];
         state.hasUnsavedChanges = true;
         saveToLocalStorage();
+        rebuildFuse();
         render();
         showNotification('🗑️ All todos cleared');
     }

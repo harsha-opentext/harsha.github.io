@@ -17,6 +17,10 @@
                 <a href="../index.html" class="icon-btn" title="Back to Apps" style="text-decoration: none;">←</a>
                 <h1>✓ Todos</h1>
             </div>
+            <div class="search-wrapper">
+                <input id="searchInput" class="search-input" type="search" placeholder="Search tasks..." aria-label="Search tasks">
+                <button id="clearSearch" class="search-clear" title="Clear search">✕</button>
+            </div>
             <div class="header-actions">
                 <button class="icon-btn" onclick="fetchFromGit()" title="Fetch from GitHub">⬇️</button>
                 <button class="icon-btn" onclick="pushToGit()" title="Push to GitHub">📤</button>
@@ -100,6 +104,7 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2/dist/fuse.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
