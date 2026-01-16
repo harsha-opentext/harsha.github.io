@@ -89,7 +89,9 @@
             <div class="header-actions">
                 <button class="btn-secondary" onclick="fetchFromGit()" style="padding: 10px 16px; font-size: 14px;">⬇️ Fetch Data</button>
                 <div style="display: flex; flex-direction: column; gap: 4px;">
-                    <input type="date" id="filter-date" class="date-filter" onchange="handleDateSelection()">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <input type="date" id="filter-date" class="date-filter" onchange="handleDateSelection()" placeholder="dd/mm/yyyy">
+                    </div>
                 </div>
                 <input type="text" id="filter-food" class="date-filter" placeholder="Search food..." oninput="filterHistory()" style="width: 150px;">
                 <button class="btn-secondary" onclick="clearFilters()" style="padding: 10px 20px;">✕ Clear</button>

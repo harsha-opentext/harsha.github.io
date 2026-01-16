@@ -561,7 +561,8 @@ async function fetchFromGit() {
     const repo = localStorage.getItem('gt_repo');
 
     if (!token || !repo) {
-        dbg("Missing credentials - please configure in Settings", "error");
+        dbg("Missing credentials - skipping GitHub fetch (no cache)", "warn");
+        // No credentials and no cache: do not load local files. Leave entries as-is.
         return;
     }
 
@@ -605,6 +606,7 @@ async function fetchFromGit() {
         
         state.entries = JSON.parse(content);
         render();
+        // Note: not caching locally in this build
         dbg(`Successfully loaded ${state.entries.length} entries`, 'info');
 
     } catch (err) {
@@ -612,6 +614,8 @@ async function fetchFromGit() {
         dbg(`Stack trace: ${err.stack}`, 'debug');
     }
 }
+
+// Load a local copy of the data file (useful when not using GitHub)
 
 async function pushToGit() {
     const token = localStorage.getItem('gt_token');
@@ -662,6 +666,7 @@ async function pushToGit() {
             state.hasUnsavedChanges = false;
             dbg("Successfully saved to GitHub", 'info');
             dbg(`New SHA: ${state.sha.substring(0, 8)}...`, 'debug');
+            // No local caching performed in this build
             
             // Format nice success message
             const [owner, repoName] = repo.split('/');
@@ -711,8 +716,7 @@ function render() {
             display = display.replace(`{${key}}`, entry[key]);
         });
         
-        // Remove date from display since we're only showing today's entries
-        display = display.replace(/\d{4}-\d{2}-\d{2}\s*-?\s*/g, '');
+        // Keep dates in display for multi-day lists
         
         // Check if entry has macros
         const hasMacros = entry.protein || entry.carbs || entry.fat;
@@ -932,11 +936,7 @@ function renderHistory() {
             // Date range
             filtered = filtered.filter(e => e.date >= state.dateRangeStart && e.date <= state.dateRangeEnd);
         }
-    } else {
-        // Default to today's entries when no date filter is applied
-        const today = new Date().toISOString().split('T')[0];
-        filtered = filtered.filter(e => e.date === today);
-    }
+    } // If no date range is set, show all entries by default
     
     if (foodFilter) {
         filtered = filtered.filter(e => e.food?.toLowerCase().includes(foodFilter));
@@ -963,56 +963,125 @@ function renderHistory() {
     const isSingleDay = state.dateRangeStart && state.dateRangeEnd && state.dateRangeStart === state.dateRangeEnd;
     const isRangeView = state.dateRangeStart && state.dateRangeEnd && state.dateRangeStart !== state.dateRangeEnd;
     
-    // Render entries
+    // Reset container to avoid duplicate renders
     container.innerHTML = '';
-    filtered.forEach((entry, index) => {
-        const globalIndex = state.entries.indexOf(entry);
-        const d = document.createElement('div');
-        d.className = 'entry-card';
-        d.id = `entry-${globalIndex}`;
-        
-        if (state.historySelectMode && state.historySelectedEntries.has(globalIndex)) {
-            d.style.background = 'rgba(0, 122, 255, 0.1)';
-            d.style.borderLeft = '4px solid var(--primary)';
-        }
-        
-        const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : '';
-        let display = `${entry.food} - ${entry.calories} kcal`;
-        if (entry.time) display += ` at ${entry.time}`;
-        
-        let macroInfo = '';
-        if (entry.protein || entry.carbs || entry.fat) {
-            const macros = [];
-            if (entry.protein) macros.push(`P: ${entry.protein}g`);
-            if (entry.carbs) macros.push(`C: ${entry.carbs}g`);
-            if (entry.fat) macros.push(`F: ${entry.fat}g`);
-            macroInfo = `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">${macros.join(' | ')}</div>`;
-        }
-        
-        // Show checkbox in select mode, edit button only in single day view or when no date filter
-        const checkbox = state.historySelectMode ? `<input type="checkbox" ${state.historySelectedEntries.has(globalIndex) ? 'checked' : ''} onchange="toggleHistoryEntrySelection(${globalIndex})" style="width: 20px; height: 20px; cursor: pointer;">` : '';
-        const showEdit = !isRangeView && !state.historySelectMode;
-        const editButton = showEdit ? `<button onclick="editEntry(${globalIndex})" style="background: #007aff; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;">Edit</button>` : '';
-        const deleteButton = !state.historySelectMode ? `<button onclick="deleteEntryGlobal(${globalIndex})" style="background: #ff3b30; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;">Delete</button>` : '';
-        
-        d.innerHTML = `
-            <div style="display: flex; gap: 12px; align-items: center;">
-                ${checkbox}
-                <div style="flex: 1;">
-                    <div style="font-weight: 500;">${display}</div>
-                    ${macroInfo}
-                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-                        ${entry.date} ${time}
+
+    // Date input placeholder is updated in handleDateSelection/clearFilters
+
+    // Empty-state when no entries match filters
+    if (filtered.length === 0) {
+        container.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No entries found for the selected filters.</div>';
+        return;
+    }
+
+    // Group entries by date (descending). Each group will be a page unit for pagination.
+    const groups = groupByDate(filtered); // { date: [entries] }
+    const sortedDates = Object.keys(groups).sort((a, b) => (new Date(b).getTime() - new Date(a).getTime()));
+
+    // Pagination state for history: entriesPerPage here means number of date groups per page
+    const perPage = 5;
+    if (!state.historyPage) state.historyPage = 1;
+    const totalPages = Math.max(1, Math.ceil(sortedDates.length / perPage));
+    if (state.historyPage > totalPages) state.historyPage = totalPages;
+
+    // Build page control UI
+    const pageControls = document.createElement('div');
+    pageControls.style.cssText = 'display:flex; justify-content:center; gap:8px; margin-bottom:12px;';
+    const prevBtn = document.createElement('button');
+    prevBtn.textContent = '← Prev';
+    prevBtn.className = 'btn-secondary';
+    prevBtn.onclick = () => { state.historyPage = Math.max(1, state.historyPage - 1); renderHistory(); };
+    if (state.historyPage === 1) prevBtn.disabled = true;
+    const nextBtn = document.createElement('button');
+    nextBtn.textContent = 'Next →';
+    nextBtn.className = 'btn-secondary';
+    nextBtn.onclick = () => { state.historyPage = Math.min(totalPages, state.historyPage + 1); renderHistory(); };
+    if (state.historyPage === totalPages) nextBtn.disabled = true;
+    const pageInfo = document.createElement('div');
+    pageInfo.style.cssText = 'align-self:center; color:var(--text-secondary);';
+    pageInfo.textContent = `Page ${state.historyPage} / ${totalPages}`;
+    pageControls.appendChild(prevBtn);
+    pageControls.appendChild(pageInfo);
+    pageControls.appendChild(nextBtn);
+
+    container.appendChild(pageControls);
+
+    // Determine which date groups to show on this page
+    const startIdx = (state.historyPage - 1) * perPage;
+    const pageDates = sortedDates.slice(startIdx, startIdx + perPage);
+
+    // Render each date group
+    pageDates.forEach(dateStr => {
+        const group = groups[dateStr];
+        const header = document.createElement('div');
+        header.style.cssText = 'font-weight:700; margin: 12px 0 8px 0;';
+        header.textContent = `${dateStr} (${group.length})`;
+        container.appendChild(header);
+
+        group.sort((a, b) => {
+            const ta = new Date(a.timestamp || (a.date + ' ' + (a.time || '00:00'))).getTime();
+            const tb = new Date(b.timestamp || (b.date + ' ' + (b.time || '00:00'))).getTime();
+            return tb - ta;
+        });
+
+        group.forEach(entry => {
+            const globalIndex = state.entries.indexOf(entry);
+            const d = document.createElement('div');
+            d.className = 'entry-card';
+            d.id = `entry-${globalIndex}`;
+
+            if (state.historySelectMode && state.historySelectedEntries.has(globalIndex)) {
+                d.style.background = 'rgba(0, 122, 255, 0.1)';
+                d.style.borderLeft = '4px solid var(--primary)';
+            }
+
+            const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : (entry.time || '');
+            let display = `${entry.food} - ${entry.calories} kcal`;
+
+            let macroInfo = '';
+            if (entry.protein || entry.carbs || entry.fat) {
+                const macros = [];
+                if (entry.protein) macros.push(`P: ${entry.protein}g`);
+                if (entry.carbs) macros.push(`C: ${entry.carbs}g`);
+                if (entry.fat) macros.push(`F: ${entry.fat}g`);
+                macroInfo = `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">${macros.join(' | ')}</div>`;
+            }
+
+            const checkbox = state.historySelectMode ? `<input type="checkbox" ${state.historySelectedEntries.has(globalIndex) ? 'checked' : ''} onchange="toggleHistoryEntrySelection(${globalIndex})" style="width: 20px; height: 20px; cursor: pointer;">` : '';
+            const showEdit = !isRangeView && !state.historySelectMode;
+            const editButton = showEdit ? `<button onclick="editEntry(${globalIndex})" style="background: #007aff; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;">Edit</button>` : '';
+            const deleteButton = !state.historySelectMode ? `<button onclick="deleteEntryGlobal(${globalIndex})" style="background: #ff3b30; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;">Delete</button>` : '';
+
+            d.innerHTML = `
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    ${checkbox}
+                    <div style="flex: 1;">
+                        <div style="font-weight: 500;">${display}</div>
+                        ${macroInfo}
+                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+                            ${time}
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        ${editButton}
+                        ${deleteButton}
                     </div>
                 </div>
-                <div style="display: flex; gap: 8px;">
-                    ${editButton}
-                    ${deleteButton}
-                </div>
-            </div>
-        `;
-        container.appendChild(d);
+            `;
+            container.appendChild(d);
+        });
     });
+}
+
+// Helper: group entries by `date` (returns { dateStr: [entries] })
+function groupByDate(entries) {
+    const map = {};
+    entries.forEach(e => {
+        const d = e.date || (e.timestamp ? new Date(e.timestamp).toISOString().split('T')[0] : 'Unknown');
+        if (!map[d]) map[d] = [];
+        map[d].push(e);
+    });
+    return map;
 }
 
 function handleDateSelection() {
@@ -1022,7 +1091,7 @@ function handleDateSelection() {
     if (!selectedDate) {
         state.dateRangeStart = null;
         state.dateRangeEnd = null;
-        dateInput.setAttribute('placeholder', 'Select date');
+        dateInput.setAttribute('placeholder', 'dd/mm/yyyy');
         return;
     }
     
@@ -1030,7 +1099,7 @@ function handleDateSelection() {
     if (!state.dateRangeStart) {
         state.dateRangeStart = selectedDate;
         dateInput.value = '';
-        dateInput.setAttribute('placeholder', `Start: ${selectedDate} (pick end or same)`);
+        dateInput.setAttribute('placeholder', `Start: ${selectedDate} — pick end or click again for single day`);
         dbg(`Date range start: ${selectedDate}`, 'debug');
         // Keep calendar open by preventing blur and refocusing
         setTimeout(() => {
@@ -1043,6 +1112,7 @@ function handleDateSelection() {
         dateInput.value = '';
         dateInput.setAttribute('placeholder', `Single day: ${selectedDate}`);
         dbg(`Single day selected: ${selectedDate}`, 'debug');
+        renderHistory();
         // Calendar will close naturally
     }
     // Different date = range and close
@@ -1053,13 +1123,15 @@ function handleDateSelection() {
             [state.dateRangeStart, state.dateRangeEnd] = [state.dateRangeEnd, state.dateRangeStart];
         }
         dateInput.value = '';
-        dateInput.setAttribute('placeholder', `${state.dateRangeStart} to ${state.dateRangeEnd}`);
+        dateInput.setAttribute('placeholder', `${state.dateRangeStart} → ${state.dateRangeEnd}`);
         dbg(`Date range: ${state.dateRangeStart} to ${state.dateRangeEnd}`, 'debug');
+        renderHistory();
         // Calendar will close naturally
     }
 }
 
 function filterHistory() {
+    state.historyPage = 1;
     renderHistory();
 }
 
@@ -1070,6 +1142,7 @@ function clearFilters() {
     document.getElementById('filter-food').value = '';
     state.dateRangeStart = null;
     state.dateRangeEnd = null;
+    state.historyPage = 1;
     renderHistory();
 }
 
@@ -1117,10 +1190,7 @@ function historySelectAll() {
         } else {
             filtered = filtered.filter(e => e.date >= state.dateRangeStart && e.date <= state.dateRangeEnd);
         }
-    } else {
-        const today = new Date().toISOString().split('T')[0];
-        filtered = filtered.filter(e => e.date === today);
-    }
+    } // else: no date filter -> include all entries
     
     if (foodFilter) {
         filtered = filtered.filter(e => e.food?.toLowerCase().includes(foodFilter));
@@ -1566,10 +1636,19 @@ window.onload = async () => {
     const schemaLoaded = await loadSchema();
     
     // Auto-fetch only if schema loaded successfully
-    if (schemaLoaded && getConfig('autoFetch') && t && r) {
-        fetchFromGit();
+    if (schemaLoaded) {
+        if (getConfig('autoFetch') && t && r) {
+            fetchFromGit();
+        } else {
+            // Do not load any local/cached data when credentials missing
+            dbg('No auto-fetch; entries remain as-is (no cache)', 'debug');
+        }
     }
     
+    // Initialize date input placeholder
+    const dateInputInit = document.getElementById('filter-date');
+    if (dateInputInit) dateInputInit.setAttribute('placeholder', 'dd/mm/yyyy');
+
     // Warn user about unsaved changes before leaving
     window.addEventListener('beforeunload', (e) => {
         if (state.hasUnsavedChanges) {
