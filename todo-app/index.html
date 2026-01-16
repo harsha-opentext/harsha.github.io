@@ -25,11 +25,6 @@
                 <div id="search-tag-dropdown" class="tag-dropdown" style="display:none; margin-left:8px;"></div>
             </div>
             <div class="header-actions">
-                <button class="icon-btn" onclick="fetchFromGit()" title="Fetch from GitHub">⬇️</button>
-                <button class="icon-btn" onclick="pushToGit()" title="Push to GitHub">📤</button>
-                <button class="icon-btn" onclick="toggleLogs()" title="Toggle Logs">🔍</button>
-                <button class="icon-btn" id="customize-btn" onclick="showCustomize()" title="Customize">🧩</button>
-                <button class="icon-btn" onclick="showSettings()" title="Settings">⚙️</button>
             </div>
         </div>
     </header>
@@ -200,5 +195,31 @@
     <script src="storage.js"></script>
     <script src="ui.js"></script>
     <script src="events.js"></script>
+
+    <!-- Bottom Navigation (mobile) -->
+    <nav class="main-nav" aria-hidden="false">
+        <div class="nav-links">
+            <a href="../index.html" class="nav-btn" style="text-decoration:none;">
+                <span class="icon">←</span>
+                <span class="label">Apps</span>
+            </a>
+            <button class="nav-btn" id="nav-add" onclick="document.getElementById('todo-input').focus();">
+                <span class="icon">➕</span>
+                <span class="label">Add</span>
+            </button>
+            <button class="nav-btn" id="nav-logs" onclick="toggleLogs()">
+                <span class="icon">🔍</span>
+                <span class="label">Logs</span>
+            </button>
+            <button class="nav-btn" id="nav-customize" onclick="showCustomize()">
+                <span class="icon">🧩</span>
+                <span class="label">Customize</span>
+            </button>
+            <button class="nav-btn" id="nav-settings" onclick="showSettings()">
+                <span class="icon">⚙️</span>
+                <span class="label">Settings</span>
+            </button>
+        </div>
+    </nav>
 </body>
 </html>
