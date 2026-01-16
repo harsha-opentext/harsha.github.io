@@ -214,7 +214,7 @@ function populateTagSelects() {
 
 function showCustomize() {
     showPage('customize');
-    document.getElementById('max-tags-text').textContent = getConfig('maxTags') || DEFAULT_CONFIG.maxTags;
+    const mtEl = document.getElementById('max-tags-text'); if (mtEl) mtEl.textContent = getConfig('maxTags') || DEFAULT_CONFIG.maxTags;
     renderTagsList();
 }
 
@@ -466,7 +466,7 @@ window.onload = async () => {
             if (v.length > maxLen) {
                 newDesc.value = v.slice(0, maxLen);
             }
-            if (newDescCount) newDescCount.textContent = newDesc.value.length;
+                    if (newDescCount) newDescCount.textContent = newDesc.value.length;
         });
     }
     // Render new desc button
@@ -691,10 +691,10 @@ function render() {
     // Important count should reflect important tasks that are not completed
     const important = state.todos.filter(t => t.important && !t.completed).length;
     
-    document.getElementById('count-all').textContent = total;
-    document.getElementById('count-active').textContent = active;
-    document.getElementById('count-completed').textContent = completed;
-    document.getElementById('total-todos-count').textContent = total;
+    const ca = document.getElementById('count-all'); if (ca) ca.textContent = total;
+    const ca2 = document.getElementById('count-active'); if (ca2) ca2.textContent = active;
+    const cc = document.getElementById('count-completed'); if (cc) cc.textContent = completed;
+    const tt = document.getElementById('total-todos-count'); if (tt) tt.textContent = total;
     // Update important count if present in DOM
     const impEl = document.getElementById('count-important');
     if (impEl) impEl.textContent = important;
@@ -704,11 +704,13 @@ function render() {
     
     // Show empty state if no todos after filtering/search
     if (filtered.length === 0) {
-        container.style.display = 'none';
-        emptyState.style.display = 'flex';
+        if (container) container.style.display = 'none';
+        if (emptyState) emptyState.style.display = 'flex';
         // Show helpful hint when search is active
         const hint = state.searchQuery ? `No results for "${state.searchQuery}"` : 'No todos yet';
-        emptyState.querySelector('p').textContent = hint;
+        if (emptyState) {
+            const p = emptyState.querySelector('p'); if (p) p.textContent = hint;
+        }
         return;
     }
     

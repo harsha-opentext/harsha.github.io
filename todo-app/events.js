@@ -3,8 +3,8 @@
 function initApp() {
     const t = localStorage.getItem('todo_token');
     const r = localStorage.getItem('todo_repo');
-    if (t) document.getElementById('cfg-token').value = t;
-    if (r) document.getElementById('cfg-repo').value = r;
+    const cfgTokenEl = document.getElementById('cfg-token'); if (t && cfgTokenEl) cfgTokenEl.value = t;
+    const cfgRepoEl = document.getElementById('cfg-repo'); if (r && cfgRepoEl) cfgRepoEl.value = r;
     const autoSave = getConfig('autoSave');
     const cfgAutosaveEl = document.getElementById('cfg-autosave'); if (cfgAutosaveEl) cfgAutosaveEl.checked = autoSave;
     updateAutoSaveUI();
@@ -103,7 +103,8 @@ function initApp() {
 function showPage(name) {
     const pages = ['main','admin','customize','analytics'];
     pages.forEach(p => {
-        const el = document.getElementById(p === 'main' ? 'page-tracker' : `page-${p}`) || document.getElementById(`page-${p}`) || document.getElementById(`page-${p}`);
+        const id = (p === 'main') ? 'page-tracker' : `page-${p}`;
+        const el = document.getElementById(id);
         if (!el) return;
         if ((p === 'main' && name === 'main') || p === name) el.style.display = 'block'; else el.style.display = 'none';
     });
@@ -121,7 +122,7 @@ function showPage(name) {
 
 // Highlight nav
 function updateNavActive(name) {
-    const mapping = { main: null, analytics: 'nav-analytics', admin: 'nav-settings', customize: 'nav-customize' };
+    const mapping = { main: 'nav-tasks', analytics: 'nav-analytics', admin: 'nav-admin', customize: 'nav-customize' };
     Object.values(mapping).forEach(id => { if (!id) return; const el = document.getElementById(id); if (el) el.classList.remove('active'); });
     const id = mapping[name]; if (id) { const el = document.getElementById(id); if (el) el.classList.add('active'); }
 }

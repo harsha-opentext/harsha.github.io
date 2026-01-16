@@ -15,7 +15,6 @@
     <header class="header">
         <div class="header-content">
             <div style="display: flex; align-items: center; gap: 12px;">
-                <a href="../index.html" class="icon-btn" title="Back to Apps" style="text-decoration: none;">←</a>
                 <h1>✓ Todos</h1>
             </div>
             <div class="search-wrapper">
@@ -31,7 +30,7 @@
     </header>
 
     <!-- Main Content -->
-    <main class="main-content">
+    <main id="page-tracker" class="main-content">
         <!-- Add Todo Form -->
         <div class="add-todo-card">
             <input type="text" id="todo-input" placeholder="What needs to be done?" class="todo-input" onkeypress="handleKeyPress(event)">
@@ -96,7 +95,6 @@
         <div style="max-width:900px; margin:0 auto;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                 <h1>Admin</h1>
-                <button class="nav-btn" onclick="showPage('main')">← Back</button>
             </div>
 
             <div class="settings-section">
@@ -148,7 +146,7 @@
                     <button onclick="copyLogs()" class="log-icon-btn" title="Copy Logs">📋</button>
                     <button onclick="clearLogs()" class="log-icon-btn" title="Clear Logs">🗑️</button>
                 </div>
-                <div id="log-screen" style="background:#111;color:#0f0;padding:12px;border-radius:8px;min-height:160px;max-height:320px;overflow:auto;font-family:monospace;font-size:12px;"></div>
+                <div id="log-screen"></div>
             </div>
         </div>
     </section>
@@ -158,7 +156,6 @@
         <div style="max-width:900px; margin:0 auto;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                 <h1>Customize</h1>
-                <button class="nav-btn" onclick="showPage('main')">← Back</button>
             </div>
             <div class="settings-section">
                 <h3>🏷️ Tags</h3>
@@ -180,9 +177,6 @@
         <div style="max-width:900px; margin:0 auto;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                 <h1>Analytics</h1>
-                <div style="display:flex;gap:8px;">
-                    <button class="nav-btn" onclick="showPage('main')">← Back</button>
-                </div>
             </div>
 
             <div class="chart-container" style="margin-bottom:16px;">
@@ -213,21 +207,21 @@
                 <span class="icon">←</span>
                 <span class="label">Apps</span>
             </a>
+            <button class="nav-btn" id="nav-tasks" onclick="showPage('main')">
+                <span class="icon">✅</span>
+                <span class="label">Tasks</span>
+            </button>
             <button class="nav-btn" id="nav-analytics" onclick="showPage('analytics')">
                 <span class="icon">📊</span>
                 <span class="label">Analytics</span>
             </button>
-            <button class="nav-btn" id="nav-logs" onclick="showPage('admin')">
+            <button class="nav-btn" id="nav-admin" onclick="showPage('admin')">
                 <span class="icon">🔍</span>
                 <span class="label">Admin</span>
             </button>
             <button class="nav-btn" id="nav-customize" onclick="showPage('customize')">
                 <span class="icon">🧩</span>
                 <span class="label">Customize</span>
-            </button>
-            <button class="nav-btn" id="nav-settings" onclick="showPage('admin')">
-                <span class="icon">⚙️</span>
-                <span class="label">Admin</span>
             </button>
         </div>
     </nav>

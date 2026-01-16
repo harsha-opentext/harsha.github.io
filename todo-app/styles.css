@@ -855,9 +855,12 @@ button { min-height: 44px; }
     font-weight: 700;
 }
 .log-controls { display:flex; gap:8px; align-items:center; }
-.log-controls select { padding:6px 8px; border-radius:8px; border:1px solid var(--border); }
-.log-controls .log-icon-btn { background: transparent; border: none; cursor: pointer; padding: 6px 8px; font-size: 16px; }
-#log-screen { padding: 12px; overflow-y: auto; }
+.log-controls select { padding:8px 10px; border-radius:8px; border:1px solid var(--border); background: #fbfdfe; font-size:14px; }
+.log-controls .log-icon-btn { background: #fbfdfe; border: 1px solid var(--border); cursor: pointer; padding: 8px 10px; font-size: 16px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 40px; }
+.log-controls .log-icon-btn:active { transform: scale(0.96); background: #f2f2f7; }
+
+/* Dark monospace log screen (moved from inline styles in HTML) */
+#log-screen { background:#0f0e11; color:#0ff48b; padding:12px; border-radius:8px; min-height:160px; max-height:320px; overflow:auto; font-family: monospace, Menlo, Monaco, 'Courier New', monospace; font-size:12px; }
 .log-item { padding: 8px 10px; border-radius: 8px; margin-bottom: 8px; background: #f7f7f8; font-size: 13px; white-space: pre-wrap; }
 .log-error { border-left: 4px solid var(--danger); background: rgba(255,59,48,0.04); }
 .log-warn { border-left: 4px solid #ff9500; background: rgba(255,149,0,0.04); }

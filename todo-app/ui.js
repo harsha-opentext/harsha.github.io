@@ -197,17 +197,17 @@ function render() {
     const active = state.todos.filter(t => !t.completed).length;
     const completed = state.todos.filter(t => t.completed).length;
     const important = state.todos.filter(t => t.important && !t.completed).length;
-    document.getElementById('count-all').textContent = total;
-    document.getElementById('count-active').textContent = active;
-    document.getElementById('count-completed').textContent = completed;
-    document.getElementById('total-todos-count').textContent = total;
+    const ca = document.getElementById('count-all'); if (ca) ca.textContent = total;
+    const ca2 = document.getElementById('count-active'); if (ca2) ca2.textContent = active;
+    const cc = document.getElementById('count-completed'); if (cc) cc.textContent = completed;
+    const tt = document.getElementById('total-todos-count'); if (tt) tt.textContent = total;
     const impEl = document.getElementById('count-important'); if (impEl) impEl.textContent = important;
     try { updateTagFilterUI(); } catch (e) {}
     if (filtered.length === 0) {
         if (container) container.style.display = 'none';
         if (emptyState) emptyState.style.display = 'flex';
         const hint = state.searchQuery ? `No results for "${state.searchQuery}"` : 'No todos yet';
-        if (emptyState) emptyState.querySelector('p').textContent = hint;
+        if (emptyState) { const p = emptyState.querySelector('p'); if (p) p.textContent = hint; }
         return;
     }
     if (container) container.style.display = 'block';
