@@ -105,7 +105,6 @@
                     </div>
                 </div>
                 <input type="text" id="filter-food" class="date-filter" placeholder="Search food..." oninput="filterHistory()" style="width: 150px;">
-                <button class="btn-secondary" onclick="clearFilters()" style="padding: 10px 20px;">✕ Clear</button>
                 <button id="history-select-mode-btn" class="btn-secondary" onclick="toggleHistorySelectMode()" style="padding: 10px 16px; font-size: 14px;">☑️ Select</button>
             </div>
         </div>
@@ -245,8 +244,7 @@
                 <div id="csv-input-section">
                     <p style="color: var(--text-secondary); margin-bottom: 12px;">Paste your CSV data below. Expected format:</p>
                     <div style="display: flex; gap: 8px; align-items: flex-start;">
-                        <pre id="example-csv" style="background: var(--bg); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-secondary);">Date,Time,Food,Calories,Prot (g),Carb (g),Fat (g)
-2026-01-15,9:00 AM,Eggs (2 whole + 2 whites),220,20.0,2.0,10.0
+                        <pre id="example-csv" style="background: var(--bg); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-secondary);">2026-01-15,9:00 AM,Eggs (2 whole + 2 whites),220,20.0,2.0,10.0
 2026-01-15,,Korean BBQ noodles (90 g),289,7.4,37.4,12.2</pre>
                         <button class="btn-secondary" style="height: 40px; margin-top: 8px;" onclick="copyExampleCsv()">📋 Copy</button>
                     </div>

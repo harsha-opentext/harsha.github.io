@@ -1845,26 +1845,40 @@ function parseCsv() {
     }
     
     try {
-        const lines = input.split('\n').filter(line => line.trim());
-        
-        if (lines.length < 2) {
-            alert('CSV must have at least a header row and one data row.');
+        const lines = input.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+
+        if (lines.length < 1) {
+            alert('CSV input is empty.');
             return;
         }
-        
-        // Parse header
-        const header = lines[0].split(',').map(h => h.trim().toLowerCase());
-        
-        // Validate required columns
-        const requiredCols = ['date', 'calories'];
-        const missingCols = requiredCols.filter(col => !header.some(h => h.includes(col)));
-        
-        if (missingCols.length > 0) {
-            alert(`Missing required columns: ${missingCols.join(', ')}`);
-            return;
+
+        // Determine whether the first row is a header (contains keywords) or data
+        const firstCols = lines[0].split(',').map(h => h.trim());
+        const firstLower = firstCols.map(c => c.toLowerCase());
+        const looksLikeHeader = firstLower.some(h => h.includes('date') || h.includes('calor') || h.includes('food') || h.includes('time'));
+
+        let header = [];
+        let startRow = 0;
+
+        if (looksLikeHeader) {
+            header = firstLower;
+            startRow = 1;
+
+            // Validate required columns when a header is present
+            const requiredCols = ['date', 'calories'];
+            const missingCols = requiredCols.filter(col => !header.some(h => h.includes(col)));
+            if (missingCols.length > 0) {
+                alert(`Missing required columns in header: ${missingCols.join(', ')}`);
+                return;
+            }
+        } else {
+            // No header provided — assume default column order:
+            // Date, Time, Food, Calories, Protein, Carbs, Fat
+            header = ['date', 'time', 'food', 'calories', 'protein', 'carbs', 'fat'];
+            startRow = 0;
         }
-        
-        // Find column indices
+
+        // Find column indices based on resolved header
         const dateIdx = header.findIndex(h => h.includes('date'));
         const timeIdx = header.findIndex(h => h.includes('time'));
         const foodIdx = header.findIndex(h => h.includes('food'));
@@ -1872,19 +1886,19 @@ function parseCsv() {
         const proteinIdx = header.findIndex(h => h.includes('prot'));
         const carbsIdx = header.findIndex(h => h.includes('carb'));
         const fatIdx = header.findIndex(h => h.includes('fat'));
-        
+
         csvTimeColumnFound = timeIdx >= 0;
         csvParsedData = [];
-        
+
         // Parse data rows
-        for (let i = 1; i < lines.length; i++) {
+        for (let i = startRow; i < lines.length; i++) {
             const values = lines[i].split(',').map(v => v.trim());
             
             if (values.length < 2) continue; // Skip invalid rows
             
             // Sanitize and validate
-            const date = values[dateIdx]?.trim();
-            const calories = parseFloat(values[caloriesIdx]);
+            const date = dateIdx >= 0 ? (values[dateIdx]?.trim()) : undefined;
+            const calories = caloriesIdx >= 0 ? parseFloat(values[caloriesIdx]) : NaN;
             
             if (!date || isNaN(calories)) {
                 dbg(`Skipping invalid row ${i}: ${lines[i]}`, 'warn');
