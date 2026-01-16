@@ -72,6 +72,19 @@ function pruneLogs() {
     }
 }
 
+function showNotification(message) {
+    const notification = document.createElement('div');
+    notification.className = 'notification';
+    notification.textContent = message;
+    notification.style.cssText = 'position: fixed; top: 80px; left: 50%; transform: translateX(-50%); background: var(--card-bg); padding: 12px 24px; border-radius: 20px; box-shadow: var(--shadow-lg); z-index: 1000; font-size: 14px; font-weight: 500;';
+    document.body.appendChild(notification);
+    setTimeout(() => {
+        notification.style.opacity = '0';
+        notification.style.transition = 'opacity 0.3s';
+        setTimeout(() => notification.remove(), 300);
+    }, 2000);
+}
+
 function updateRetention() {
     const sel = document.getElementById('log-retention');
     if (!sel) return;
@@ -1694,6 +1707,91 @@ function parseCsv() {
         dbg(`CSV parse error: ${err.message}`, 'error');
         alert('Failed to parse CSV. Please check the format.');
     }
+}
+
+function copyExampleCsv() {
+    const pre = document.getElementById('example-csv');
+    if (!pre) {
+        alert('Example CSV not found');
+        return;
+    }
+    const text = (pre.textContent || pre.innerText || '').trim();
+    if (!text) {
+        alert('Example CSV is empty');
+        return;
+    }
+
+    // Helper to finalize on success
+    const onSuccess = () => {
+        showNotification('📋 Example CSV copied to clipboard');
+    };
+
+    // If Clipboard API available, use it
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(onSuccess).catch(err => {
+            // Fallback to range selection
+            try {
+                const range = document.createRange();
+                range.selectNodeContents(pre);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+                const ok = document.execCommand('copy');
+                sel.removeAllRanges();
+                if (ok) {
+                    onSuccess();
+                    return;
+                }
+            } catch (e) {
+                // ignore
+            }
+            // Final fallback: textarea
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed'; textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                onSuccess();
+            } catch (e) {
+                alert('Failed to copy example CSV to clipboard');
+            }
+            textarea.remove();
+        });
+        return;
+    }
+
+    // If no clipboard API, try range selection first
+    try {
+        const range = document.createRange();
+        range.selectNodeContents(pre);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        const ok = document.execCommand('copy');
+        sel.removeAllRanges();
+        if (ok) {
+            onSuccess();
+            return;
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    // Fallback textarea
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed'; textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+        document.execCommand('copy');
+        onSuccess();
+    } catch (e) {
+        alert('Failed to copy example CSV to clipboard');
+    }
+    textarea.remove();
 }
 
 function displayCsvPreview() {

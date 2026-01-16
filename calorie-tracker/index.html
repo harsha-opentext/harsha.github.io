@@ -231,9 +231,12 @@
             <div class="modal-body">
                 <div id="csv-input-section">
                     <p style="color: var(--text-secondary); margin-bottom: 12px;">Paste your CSV data below. Expected format:</p>
-                    <pre style="background: var(--bg); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-secondary);">Date,Time,Food,Calories,Prot (g),Carb (g),Fat (g)
+                    <div style="display: flex; gap: 8px; align-items: flex-start;">
+                        <pre id="example-csv" style="background: var(--bg); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-secondary);">Date,Time,Food,Calories,Prot (g),Carb (g),Fat (g)
 2026-01-15,9:00 AM,Eggs (2 whole + 2 whites),220,20.0,2.0,10.0
 2026-01-15,,Korean BBQ noodles (90 g),289,7.4,37.4,12.2</pre>
+                        <button class="btn-secondary" style="height: 40px; margin-top: 8px;" onclick="copyExampleCsv()">📋 Copy</button>
+                    </div>
                     <textarea id="csv-input" placeholder="Paste CSV data here..." style="width: 100%; height: 200px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 13px; margin: 12px 0;"></textarea>
                     <button class="btn-primary" onclick="parseCsv()" style="width: 100%;">🔍 Parse & Preview</button>
                 </div>
