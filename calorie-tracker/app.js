@@ -15,6 +15,7 @@ let state = {
     tempCsvData: null,
     csvSource: null,
     autoSyncing: false
+    
 };
 
 const LOG_LEVELS = {
@@ -49,6 +50,170 @@ function dbg(msg, type = 'info', raw = null) {
         pruneLogs();
     } catch (e) { /* ignore */ }
 }
+
+function toggleViewMode() {
+    state.viewMode = state.viewMode === 'today' ? 'all' : 'today';
+    const btn = document.getElementById('view-toggle-btn');
+    if (btn) btn.textContent = state.viewMode === 'today' ? 'Show: Today' : 'Show: All';
+    dbg(`View mode changed to: ${state.viewMode}`, 'info');
+    render();
+}
+
+function updateDateButton() {
+    const btn = document.getElementById('date-btn');
+    if (!btn) return;
+    btn.textContent = getTodayString();
+}
+
+// Helper: format a Date (or timestamp) into local YYYY-MM-DD
+function formatDateLocal(input) {
+    const d = new Date(input);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
+
+function getTodayString() {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
+
+function isTodayEntry(entry) {
+    const today = getTodayString();
+    if (!entry) return false;
+
+    // If an explicit `date` field is present, rely on that only.
+    // This prevents UTC timestamps (e.g., 2026-01-15T23:30Z) from being
+    // converted to the local next-day and incorrectly showing an entry
+    // with `date: 2026-01-15` on the 2026-01-16 tracker view.
+    if (entry.date) {
+        const dateStr = (entry.date || '').trim();
+        const isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (isoMatch) {
+            const y = parseInt(isoMatch[1], 10);
+            const m = parseInt(isoMatch[2], 10) - 1;
+            const d = parseInt(isoMatch[3], 10);
+            const localDate = new Date(y, m, d);
+            return formatDateLocal(localDate) === today;
+        } else {
+            // Fallback: try generic Date parse
+            try {
+                const parsed = new Date(entry.date);
+                return !isNaN(parsed.getTime()) && formatDateLocal(parsed) === today;
+            } catch (e) { /* ignore */ }
+        }
+    }
+
+    // If no explicit `date` field is present, fall back to `timestamp`.
+    if (entry.timestamp) {
+        try {
+            const parsedTs = new Date(entry.timestamp);
+            return !isNaN(parsedTs.getTime()) && formatDateLocal(parsedTs) === today;
+        } catch (e) { /* ignore */ }
+    }
+
+    return false;
+}
+
+function render() {
+    const container = document.getElementById('list-container');
+    const totalEl = document.getElementById('total-kcal');
+    updateDateButton();
+    
+    if (!state.schema) {
+        container.innerHTML = '<p>Loading schema...</p>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    let total = 0;
+    let renderedCount = 0;
+    const totalField = state.schema.totalField;
+
+    // Only show entries for today on the add-entry / tracker view
+    const totalEntries = state.entries.length;
+    let todayMatches = 0;
+    state.entries.forEach((entry) => { if (isTodayEntry(entry)) todayMatches++; });
+    dbg(`Rendering tracker: ${todayMatches} / ${totalEntries} entries match today's date (${getTodayString()})`, 'debug');
+
+    state.entries.forEach((entry, index) => {
+        if (!isTodayEntry(entry)) return; // skip non-today entries but keep global index
+
+        renderedCount++;
+
+        if (totalField && entry[totalField]) {
+            total += parseFloat(entry[totalField]);
+        }
+        
+        const d = document.createElement('div');
+        d.className = 'entry-card';
+        if (state.selectMode && state.selectedEntries.has(index)) {
+            d.style.background = 'rgba(0, 122, 255, 0.1)';
+            d.style.borderLeft = '4px solid var(--primary)';
+        }
+        
+        // Format display based on schema displayFormat
+        let display = state.schema.displayFormat;
+        Object.keys(entry).forEach(key => {
+            display = display.replace(`{${key}}`, entry[key]);
+        });
+        
+        // Check if entry has macros
+        const hasMacros = entry.protein || entry.carbs || entry.fat;
+        let macroHtml = '';
+        if (hasMacros) {
+            const macros = [];
+            if (entry.protein) macros.push(`Protein: ${entry.protein}g`);
+            if (entry.carbs) macros.push(`Carbs: ${entry.carbs}g`);
+            if (entry.fat) macros.push(`Fat: ${entry.fat}g`);
+            macroHtml = `
+                <div id="macros-${index}" style="display: none; margin-top: 8px; padding: 8px; background: var(--bg); border-radius: 6px; font-size: 12px; color: var(--text-secondary);">
+                    ${macros.join(' | ')}
+                </div>
+            `;
+        }
+        
+        const checkbox = state.selectMode ? `<input type="checkbox" ${state.selectedEntries.has(index) ? 'checked' : ''} onchange="toggleEntrySelection(${index})" style="width: 20px; height: 20px; cursor: pointer;">` : '';
+        const expandBtn = hasMacros && !state.selectMode ? `<button onclick="toggleMacros(${index})" style="background: var(--bg); border: 1px solid var(--border); cursor: pointer; font-size: 16px; padding: 6px 10px; border-radius: 8px; color: var(--primary); font-weight: bold; transition: all 0.2s;" onmouseover="this.style.background='var(--primary)'; this.style.color='white';" onmouseout="this.style.background='var(--bg)'; this.style.color='var(--primary)';">▶</button>` : '';
+        const deleteBtn = !state.selectMode ? `<button onclick="deleteEntry(${index})" style="background: #ff3b30; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">Delete</button>` : '';
+        
+        d.innerHTML = `
+            <div style="display: flex; gap: 12px; align-items: center; width: 100%;">
+                ${checkbox}
+                ${expandBtn}
+                <span style="flex: 1;">${display}</span>
+                ${deleteBtn}
+            </div>
+            ${macroHtml}
+        `;
+        container.appendChild(d);
+    });
+
+    if (renderedCount === 0) {
+        container.innerHTML = '<div style="padding:18px; color:var(--text-secondary);">No entries for today. Add your first entry using the form above.</div>';
+    }
+
+    totalEl.innerText = `${total} ${totalField || 'total'}`;
+}
+
+// Debug helper: dump entry matching info (only when debug enabled)
+function dumpEntryDebugInfo() {
+    if (LOG_LEVELS[state.logLevel] > LOG_LEVELS.debug) return;
+    try {
+        state.entries.forEach((entry, i) => {
+            const reportedDate = entry.date || (entry.timestamp ? formatDateLocal(entry.timestamp) : 'none');
+            const match = isTodayEntry(entry);
+            dbg(`Entry[${i}] date:${entry.date || 'n/a'} timestamp:${entry.timestamp || 'n/a'} -> reported:${reportedDate} match:${match}`, 'debug');
+        });
+    } catch (e) { /* ignore */ }
+}
+
+// Call debug dump after render to help diagnose date issues
+dumpEntryDebugInfo();
 
 function clearLogs() { document.getElementById('log-screen').innerHTML = ''; }
 
@@ -684,73 +849,9 @@ async function pushToGit() {
     }
 }
 
-function render() {
-    const container = document.getElementById('list-container');
-    const totalEl = document.getElementById('total-kcal');
-    
-    if (!state.schema) {
-        container.innerHTML = '<p>Loading schema...</p>';
-        return;
-    }
-    
-    container.innerHTML = '';
-    let total = 0;
-    
-    const totalField = state.schema.totalField;
-    
-    state.entries.forEach((entry, index) => {
-        if (totalField && entry[totalField]) {
-            total += parseFloat(entry[totalField]);
-        }
-        
-        const d = document.createElement('div');
-        d.className = 'entry-card';
-        if (state.selectMode && state.selectedEntries.has(index)) {
-            d.style.background = 'rgba(0, 122, 255, 0.1)';
-            d.style.borderLeft = '4px solid var(--primary)';
-        }
-        
-        // Format display based on schema displayFormat
-        let display = state.schema.displayFormat;
-        Object.keys(entry).forEach(key => {
-            display = display.replace(`{${key}}`, entry[key]);
-        });
-        
-        // Keep dates in display for multi-day lists
-        
-        // Check if entry has macros
-        const hasMacros = entry.protein || entry.carbs || entry.fat;
-        let macroHtml = '';
-        if (hasMacros) {
-            const macros = [];
-            if (entry.protein) macros.push(`Protein: ${entry.protein}g`);
-            if (entry.carbs) macros.push(`Carbs: ${entry.carbs}g`);
-            if (entry.fat) macros.push(`Fat: ${entry.fat}g`);
-            macroHtml = `
-                <div id="macros-${index}" style="display: none; margin-top: 8px; padding: 8px; background: var(--bg); border-radius: 6px; font-size: 12px; color: var(--text-secondary);">
-                    ${macros.join(' | ')}
-                </div>
-            `;
-        }
-        
-        const checkbox = state.selectMode ? `<input type="checkbox" ${state.selectedEntries.has(index) ? 'checked' : ''} onchange="toggleEntrySelection(${index})" style="width: 20px; height: 20px; cursor: pointer;">` : '';
-        const expandBtn = hasMacros && !state.selectMode ? `<button onclick="toggleMacros(${index})" style="background: var(--bg); border: 1px solid var(--border); cursor: pointer; font-size: 16px; padding: 6px 10px; border-radius: 8px; color: var(--primary); font-weight: bold; transition: all 0.2s;" onmouseover="this.style.background='var(--primary)'; this.style.color='white';" onmouseout="this.style.background='var(--bg)'; this.style.color='var(--primary)';">▶</button>` : '';
-        const deleteBtn = !state.selectMode ? `<button onclick="deleteEntry(${index})" style="background: #ff3b30; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">Delete</button>` : '';
-        
-        d.innerHTML = `
-            <div style="display: flex; gap: 12px; align-items: center; width: 100%;">
-                ${checkbox}
-                ${expandBtn}
-                <span style="flex: 1;">${display}</span>
-                ${deleteBtn}
-            </div>
-            ${macroHtml}
-        `;
-        container.appendChild(d);
-    });
-    
-    totalEl.innerText = `${total} ${totalField || 'total'}`;
-}
+// NOTE: The original all-entries render implementation was removed.
+// The app now uses the single, earlier `render()` function which
+// filters entries to show only today's entries on the tracker page.
 
 function deleteEntry(index) {
     if (confirm('Delete this entry?')) {
@@ -1090,6 +1191,40 @@ function groupByDate(entries) {
         map[d].push(e);
     });
     return map;
+}
+
+function addDaysToDateString(dateStr, days) {
+    const parts = dateStr.split('-');
+    const d = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
+    d.setDate(d.getDate() + days);
+    return formatDateLocal(d);
+}
+
+function handleRangeSelect() {
+    const sel = document.getElementById('range-select');
+    if (!sel) return;
+    const v = sel.value;
+    const today = getTodayString();
+
+    if (!v || v === 'all') {
+        state.dateRangeStart = null;
+        state.dateRangeEnd = null;
+    } else if (v === 'today') {
+        state.dateRangeStart = today;
+        state.dateRangeEnd = today;
+    } else if (v === 'yesterday') {
+        state.dateRangeStart = addDaysToDateString(today, -1);
+        state.dateRangeEnd = state.dateRangeStart;
+    } else {
+        // numeric days (last N days)
+        const days = parseInt(v, 10);
+        const start = addDaysToDateString(today, -(days - 1));
+        state.dateRangeStart = start;
+        state.dateRangeEnd = today;
+    }
+
+    state.historyPage = 1;
+    renderHistory();
 }
 
 function handleDateSelection() {
@@ -1667,6 +1802,12 @@ window.onload = async () => {
     // Initialize date input placeholder
     const dateInputInit = document.getElementById('filter-date');
     if (dateInputInit) dateInputInit.setAttribute('placeholder', 'dd/mm/yyyy');
+
+    // Ensure date button and tracker render initialize even if no fetch occurs
+    try {
+        updateDateButton();
+        render();
+    } catch (e) { /* ignore if DOM not ready */ }
 
     // Warn user about unsaved changes before leaving
     window.addEventListener('beforeunload', (e) => {

@@ -53,6 +53,9 @@
                     <button class="btn-secondary" onclick="fetchFromGit()" style="padding: 10px 16px; font-size: 14px;">⬇️ Fetch Data</button>
                     <button class="btn-primary" onclick="pushToGit()" style="padding: 10px 16px; font-size: 14px;">📤 Publish Data</button>
                 </div>
+                <div style="display:flex; align-items:center; gap:8px; padding-left:8px; border-left: 1px solid var(--border);">
+                    <button id="date-btn" class="btn-secondary" style="padding: 8px 12px; font-size: 13px;">Date</button>
+                </div>
                 <div style="display: flex; gap: 8px; padding-left: 8px; border-left: 1px solid var(--border);">
                     <button class="btn-secondary" onclick="openCsvImport()" style="padding: 10px 16px; font-size: 14px;">📄 Import CSV</button>
                     <button id="select-mode-btn" class="btn-secondary" onclick="toggleSelectMode()" style="padding: 10px 16px; font-size: 14px;">☑️ Select</button>
@@ -90,7 +93,15 @@
                 <button class="btn-secondary" onclick="fetchFromGit()" style="padding: 10px 16px; font-size: 14px;">⬇️ Fetch Data</button>
                 <div style="display: flex; flex-direction: column; gap: 4px;">
                     <div style="display:flex; align-items:center; gap:8px;">
-                        <input type="date" id="filter-date" class="date-filter" onchange="handleDateSelection()" placeholder="dd/mm/yyyy">
+                        <select id="range-select" class="date-filter" onchange="handleRangeSelect()" style="padding: 8px;">
+                            <option value="">Select range</option>
+                            <option value="today">Today</option>
+                            <option value="yesterday">Yesterday</option>
+                            <option value="7">Last 7 days</option>
+                            <option value="30">Last 30 days</option>
+                            <option value="90">Last 90 days</option>
+                            <option value="all">All time</option>
+                        </select>
                     </div>
                 </div>
                 <input type="text" id="filter-food" class="date-filter" placeholder="Search food..." oninput="filterHistory()" style="width: 150px;">
