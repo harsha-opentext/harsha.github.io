@@ -79,6 +79,9 @@ function initApp() {
 
     render();
 
+    // Ensure the correct page is shown (main by default)
+    showPage('main');
+
     // New-item controls
     const newStar = document.getElementById('new-star-btn');
     if (newStar) { newStar.onclick = () => { newStar.classList.toggle('starred'); newStar.textContent = newStar.classList.contains('starred') ? '★' : '☆'; }; }
@@ -96,9 +99,36 @@ function initApp() {
     // Customize modal close/create hooked earlier
 }
 
+// Simple SPA page switcher
+function showPage(name) {
+    const pages = ['main','admin','customize','analytics'];
+    pages.forEach(p => {
+        const el = document.getElementById(p === 'main' ? 'page-tracker' : `page-${p}`) || document.getElementById(`page-${p}`) || document.getElementById(`page-${p}`);
+        if (!el) return;
+        if ((p === 'main' && name === 'main') || p === name) el.style.display = 'block'; else el.style.display = 'none';
+    });
+    // When showing analytics, trigger render
+    if (name === 'analytics') {
+        if (typeof renderAnalytics === 'function') renderAnalytics();
+    }
+    if (name === 'customize') {
+        // render customize page UI
+        const mt = document.getElementById('max-tags-text'); if (mt) mt.textContent = getConfig('maxTags') || DEFAULT_CONFIG.maxTags;
+        renderTagsList();
+    }
+    updateNavActive(name);
+}
+
+// Highlight nav
+function updateNavActive(name) {
+    const mapping = { main: null, analytics: 'nav-analytics', admin: 'nav-settings', customize: 'nav-customize' };
+    Object.values(mapping).forEach(id => { if (!id) return; const el = document.getElementById(id); if (el) el.classList.remove('active'); });
+    const id = mapping[name]; if (id) { const el = document.getElementById(id); if (el) el.classList.add('active'); }
+}
+
 // Settings
-function showSettings() { const m = document.getElementById('settings-modal'); if (m) m.style.display = 'flex'; }
-function closeSettings() { const m = document.getElementById('settings-modal'); if (m) m.style.display = 'none'; }
+function showSettings() { showPage('admin'); }
+function closeSettings() { showPage('main'); }
 function saveSettings() {
     const token = document.getElementById('cfg-token').value.trim();
     const repo = document.getElementById('cfg-repo').value.trim();

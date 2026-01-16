@@ -213,13 +213,13 @@ function populateTagSelects() {
 }
 
 function showCustomize() {
-    document.getElementById('customize-modal').style.display = 'flex';
+    showPage('customize');
     document.getElementById('max-tags-text').textContent = getConfig('maxTags') || DEFAULT_CONFIG.maxTags;
     renderTagsList();
 }
 
 function closeCustomize() {
-    document.getElementById('customize-modal').style.display = 'none';
+    showPage('main');
 }
 
 function renderTagsList() {
@@ -987,18 +987,14 @@ async function pushToGit(isAutoSave = false) {
 }
 
 // Settings
-function showSettings() {
-    document.getElementById('settings-modal').style.display = 'flex';
-}
+function showSettings() { showPage('admin'); }
 
-function closeSettings() {
-    document.getElementById('settings-modal').style.display = 'none';
-}
+function closeSettings() { showPage('main'); }
 
 function saveSettings() {
-    const token = document.getElementById('cfg-token').value.trim();
-    const repo = document.getElementById('cfg-repo').value.trim();
-    const autoSave = document.getElementById('cfg-autosave').checked;
+    const token = (document.getElementById('cfg-token')||{value:''}).value.trim();
+    const repo = (document.getElementById('cfg-repo')||{value:''}).value.trim();
+    const autoSave = (document.getElementById('cfg-autosave')||{checked:false}).checked;
     
     if (!token || !repo) {
         alert('Please enter both token and repository');

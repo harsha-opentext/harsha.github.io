@@ -8,6 +8,7 @@
     <title>Todo App</title>
     <link rel="stylesheet" href="styles.css">
     <script src="config.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <!-- Header -->
@@ -90,103 +91,112 @@
         </div>
     </main>
 
-    <!-- Log Panel (Slide-out) -->
-    <aside class="log-panel" id="log-panel" aria-hidden="true">
-        <div class="log-header-bar">
-            <span>🔍 System Logs</span>
-            <div class="log-controls">
-                <select id="log-level" onchange="updateLogLevel()" title="Log Level">
-                    <option value="debug">Debug</option>
-                    <option value="info" selected>Info</option>
-                    <option value="warn">Warn</option>
-                    <option value="error">Error</option>
-                </select>
-                <select id="log-retention" onchange="updateRetention()" title="Log Retention">
-                    <option value="2">2 min</option>
-                    <option value="5" selected>5 min</option>
-                    <option value="15">15 min</option>
-                    <option value="60">60 min</option>
-                    <option value="0">All</option>
-                </select>
-                <button onclick="saveLogs()" class="log-icon-btn" title="Save Logs to GitHub">💾</button>
-                <button onclick="copyLogs()" class="log-icon-btn" title="Copy Logs">📋</button>
-                <button onclick="clearLogs()" class="log-icon-btn" title="Clear Logs">🗑️</button>
-                <button onclick="toggleLogs()" class="log-icon-btn" title="Close">✕</button>
+    <!-- Admin Page (contains Settings + Logs) -->
+    <section id="page-admin" class="page" style="display:none; padding:20px; padding-bottom:calc(96px + var(--safe-area-bottom));">
+        <div style="max-width:900px; margin:0 auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h1>Admin</h1>
+                <button class="nav-btn" onclick="showPage('main')">← Back</button>
+            </div>
+
+            <div class="settings-section">
+                <h3>🔐 GitHub Configuration</h3>
+                <div class="form-group">
+                    <label>Personal Access Token</label>
+                    <input type="password" id="cfg-token" placeholder="ghp_..." class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Repository Path</label>
+                    <input type="text" id="cfg-repo" placeholder="username/repo-name" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                        <input type="checkbox" id="cfg-autosave" style="width: 24px; height: 24px; cursor: pointer;">
+                        <div>
+                            <div style="font-weight: 600;">🔄 Auto-Save</div>
+                            <div style="font-size: 13px; color: var(--text-secondary); font-weight: normal;">Automatically sync changes to GitHub</div>
+                        </div>
+                    </label>
+                </div>
+                <button class="btn-primary" onclick="saveSettings()">💾 Save & Connect</button>
+            </div>
+
+            <div class="settings-section">
+                <h3>🔄 Data Management</h3>
+                <button class="btn-secondary" onclick="fetchFromGit()">⬇️ Fetch from GitHub</button>
+                <button class="btn-secondary" onclick="pushToGit()">⬆️ Push to GitHub</button>
+                <button class="btn-danger" onclick="clearAllData()">🗑️ Clear All Todos</button>
+            </div>
+
+            <div class="settings-section">
+                <h3>🔍 System Logs</h3>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+                    <select id="log-level" onchange="updateLogLevel()" title="Log Level">
+                        <option value="debug">Debug</option>
+                        <option value="info" selected>Info</option>
+                        <option value="warn">Warn</option>
+                        <option value="error">Error</option>
+                    </select>
+                    <select id="log-retention" onchange="updateRetention()" title="Log Retention">
+                        <option value="2">2 min</option>
+                        <option value="5" selected>5 min</option>
+                        <option value="15">15 min</option>
+                        <option value="60">60 min</option>
+                        <option value="0">All</option>
+                    </select>
+                    <button onclick="saveLogs()" class="log-icon-btn" title="Save Logs to GitHub">💾</button>
+                    <button onclick="copyLogs()" class="log-icon-btn" title="Copy Logs">📋</button>
+                    <button onclick="clearLogs()" class="log-icon-btn" title="Clear Logs">🗑️</button>
+                </div>
+                <div id="log-screen" style="background:#111;color:#0f0;padding:12px;border-radius:8px;min-height:160px;max-height:320px;overflow:auto;font-family:monospace;font-size:12px;"></div>
             </div>
         </div>
-        <div id="log-screen"></div>
-    </aside>
+    </section>
 
-    <!-- Settings Modal -->
-    <div id="settings-modal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>⚙️ Settings</h2>
-                <button onclick="closeSettings()" class="modal-close">✕</button>
+    <!-- Customize Page (tags) -->
+    <section id="page-customize" class="page" style="display:none; padding:20px; padding-bottom:calc(96px + var(--safe-area-bottom));">
+        <div style="max-width:900px; margin:0 auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h1>Customize</h1>
+                <button class="nav-btn" onclick="showPage('main')">← Back</button>
             </div>
-            <div class="modal-body">
-                <div class="settings-section">
-                    <h3>🔐 GitHub Configuration</h3>
-                    <div class="form-group">
-                        <label>Personal Access Token</label>
-                        <input type="password" id="cfg-token" placeholder="ghp_..." class="form-input">
-                    </div>
-                    <div class="form-group">
-                        <label>Repository Path</label>
-                        <input type="text" id="cfg-repo" placeholder="username/repo-name" class="form-input">
-                    </div>
-                    <div class="form-group">
-                        <label style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
-                            <input type="checkbox" id="cfg-autosave" style="width: 24px; height: 24px; cursor: pointer;">
-                            <div>
-                                <div style="font-weight: 600;">🔄 Auto-Save</div>
-                                <div style="font-size: 13px; color: var(--text-secondary); font-weight: normal;">Automatically sync changes to GitHub</div>
-                            </div>
-                        </label>
-                    </div>
-                    <button class="btn-primary" onclick="saveSettings()">💾 Save & Connect</button>
+            <div class="settings-section">
+                <h3>🏷️ Tags</h3>
+                <p>Create up to <span id="max-tags-text"></span> tags. Default tag: <strong>in-progress</strong></p>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <input id="new-tag-input" class="form-input" placeholder="New tag name" style="flex:1; min-height:40px;" />
+                    <button class="btn-primary" id="create-tag-btn">Create</button>
                 </div>
-
-                <div class="settings-section">
-                    <h3>🔄 Data Management</h3>
-                    <button class="btn-secondary" onclick="fetchFromGit()">⬇️ Fetch from GitHub</button>
-                    <button class="btn-secondary" onclick="pushToGit()">⬆️ Push to GitHub</button>
-                    <button class="btn-danger" onclick="clearAllData()">🗑️ Clear All Todos</button>
+                <div style="margin-top:12px;">
+                    <button class="btn-secondary" id="clear-all-tags-btn">Clear All Tags</button>
                 </div>
-
-                <div class="settings-section">
-                    <h3>📱 App Info</h3>
-                    <p><strong>Version:</strong> 1.0.0</p>
-                    <p><strong>Data File:</strong> <code>todos.json</code></p>
-                    <p><strong>Total Todos:</strong> <span id="total-todos-count">0</span></p>
-                </div>
+                <div id="tags-list" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;"></div>
             </div>
         </div>
-    </div>
+    </section>
 
-    <!-- Customize Modal (tags) -->
-    <div id="customize-modal" class="modal" style="display:none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>🧩 Customize</h2>
-                <button onclick="closeCustomize()" class="modal-close">✕</button>
-            </div>
-            <div class="modal-body">
-                <div class="settings-section">
-                    <h3>🏷️ Tags</h3>
-                    <p>Create up to <span id="max-tags-text"></span> tags. Default tag: <strong>in-progress</strong></p>
-                    <div style="display:flex;gap:8px;align-items:center;">
-                        <input id="new-tag-input" class="form-input" placeholder="New tag name" style="flex:1; min-height:40px;" />
-                        <button class="btn-primary" id="create-tag-btn">Create</button>
-                    </div>
-                    <div style="margin-top:12px;">
-                        <button class="btn-secondary" id="clear-all-tags-btn">Clear All Tags</button>
-                    </div>
-                    <div id="tags-list" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;"></div>
+    <!-- Analytics Page -->
+    <section id="page-analytics" class="page" style="display:none; padding:20px; padding-bottom:calc(96px + var(--safe-area-bottom));">
+        <div style="max-width:900px; margin:0 auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h1>Analytics</h1>
+                <div style="display:flex;gap:8px;">
+                    <button class="nav-btn" onclick="showPage('main')">← Back</button>
                 </div>
             </div>
+
+            <div class="chart-container" style="margin-bottom:16px;">
+                <h3>Completion</h3>
+                <canvas id="analytics-pie" width="300" height="200"></canvas>
+            </div>
+
+            <div class="settings-section">
+                <h3>🔔 Expiring Soon</h3>
+                <div id="expiring-list" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;"></div>
+                <div style="display:flex;justify-content:center;margin-top:12px;"><button class="btn-secondary" id="view-all-expiring">View All</button></div>
+            </div>
         </div>
-    </div>
+    </section>
 
     <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2/dist/fuse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -203,21 +213,21 @@
                 <span class="icon">←</span>
                 <span class="label">Apps</span>
             </a>
-            <button class="nav-btn" id="nav-add" onclick="document.getElementById('todo-input').focus();">
-                <span class="icon">➕</span>
-                <span class="label">Add</span>
+            <button class="nav-btn" id="nav-analytics" onclick="showPage('analytics')">
+                <span class="icon">📊</span>
+                <span class="label">Analytics</span>
             </button>
-            <button class="nav-btn" id="nav-logs" onclick="toggleLogs()">
+            <button class="nav-btn" id="nav-logs" onclick="showPage('admin')">
                 <span class="icon">🔍</span>
-                <span class="label">Logs</span>
+                <span class="label">Admin</span>
             </button>
-            <button class="nav-btn" id="nav-customize" onclick="showCustomize()">
+            <button class="nav-btn" id="nav-customize" onclick="showPage('customize')">
                 <span class="icon">🧩</span>
                 <span class="label">Customize</span>
             </button>
-            <button class="nav-btn" id="nav-settings" onclick="showSettings()">
+            <button class="nav-btn" id="nav-settings" onclick="showPage('admin')">
                 <span class="icon">⚙️</span>
-                <span class="label">Settings</span>
+                <span class="label">Admin</span>
             </button>
         </div>
     </nav>

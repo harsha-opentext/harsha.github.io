@@ -59,12 +59,12 @@ function updateTagFilterUI() {
 }
 
 function showCustomize() {
-    const modal = document.getElementById('customize-modal'); if (modal) modal.style.display = 'flex';
+    showPage('customize');
     const mt = document.getElementById('max-tags-text'); if (mt) mt.textContent = getConfig('maxTags') || DEFAULT_CONFIG.maxTags;
     renderTagsList();
 }
 
-function closeCustomize() { const m = document.getElementById('customize-modal'); if (m) m.style.display = 'none'; }
+function closeCustomize() { showPage('main'); }
 
 // Simple markdown -> HTML renderer (very small subset)
 function renderMarkdown(md) {
@@ -94,6 +94,57 @@ function openMarkdownModal(mdText) {
     const html = renderMarkdown(mdText || '');
     mdBody.innerHTML = html || '<div style="color:var(--text-secondary)">Empty</div>';
     mdModal.style.display = 'flex';
+}
+
+// Analytics
+let analyticsChart = null;
+function renderAnalytics() {
+    try {
+        const completed = state.todos.filter(t => t.completed).length;
+        const pending = state.todos.filter(t => !t.completed).length;
+        const ctx = document.getElementById('analytics-pie');
+        if (ctx && typeof Chart !== 'undefined') {
+            if (analyticsChart) analyticsChart.destroy();
+            analyticsChart = new Chart(ctx.getContext('2d'), {
+                type: 'pie',
+                data: {
+                    labels: ['Pending','Completed'],
+                    datasets: [{ data: [pending, completed], backgroundColor: ['#ffcc00', 'var(--primary)'] }]
+                },
+                options: { plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+
+        // Expiring soon: tasks with expiresAt in future, sorted ascending
+        const now = Date.now();
+        const expiring = state.todos.filter(t => t.expiresAt).map(t => ({ ...t, expiresAtTs: new Date(t.expiresAt).getTime() })).filter(t => t.expiresAtTs >= now).sort((a,b) => a.expiresAtTs - b.expiresAtTs);
+        const top5 = expiring.slice(0,5);
+        const list = document.getElementById('expiring-list');
+        if (list) {
+            list.innerHTML = top5.map(t => {
+                const d = new Date(t.expiresAt).toLocaleString();
+                return `<div style="background:var(--card-bg);padding:12px;border-radius:12px;box-shadow:var(--shadow);display:flex;justify-content:space-between;align-items:center;"><div><div style="font-weight:600">${escapeHtml(t.text)}</div><div style="font-size:12px;color:var(--text-secondary)">Expires: ${d}</div></div><div style="margin-left:12px;color:${t.important ? 'var(--primary)' : 'var(--text-secondary)'}">${t.important ? '★' : ''}</div></div>`;
+            }).join('');
+            if (top5.length === 0) list.innerHTML = '<div style="color:var(--text-secondary)">No upcoming expiries</div>';
+        }
+
+        const viewAllBtn = document.getElementById('view-all-expiring');
+        if (viewAllBtn) {
+            viewAllBtn.onclick = () => {
+                // Show main page and sort by expiry (closest first)
+                showPage('main');
+                // Temporarily sort state.todos for view: create a view by reordering filtered container
+                const container = document.getElementById('todo-list');
+                const expAll = expiring.concat(state.todos.filter(t => !t.expiresAt || new Date(t.expiresAt).getTime() < now));
+                // Render a quick overlay listing here instead of reordering todos
+                const overlay = document.createElement('div'); overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:3000;padding:20px;';
+                const box = document.createElement('div'); box.style.cssText = 'width:100%;max-width:900px;background:var(--card-bg);padding:16px;border-radius:12px;max-height:80vh;overflow:auto;';
+                box.innerHTML = `<h3>All Expiring Tasks</h3><div style="display:flex;flex-direction:column;gap:8px;">${expAll.map(t=>`<div style="padding:10px;border-radius:10px;background:#fbfdfe;"><strong>${escapeHtml(t.text)}</strong><div style="font-size:12px;color:var(--text-secondary)">${t.expiresAt ? new Date(t.expiresAt).toLocaleString() : 'No expiry'}</div></div>`).join('')}</div><div style="display:flex;justify-content:center;margin-top:12px;"><button class="btn-primary" id="close-exp-overlay">Close</button></div>`;
+                overlay.appendChild(box); document.body.appendChild(overlay);
+                document.getElementById('close-exp-overlay').onclick = () => overlay.remove();
+            };
+        }
+    } catch (e) { dbg('Analytics render failed: ' + (e && e.message ? e.message : e), 'error', e); }
 }
 
 // Edit handlers
