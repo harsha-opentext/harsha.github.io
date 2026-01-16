@@ -911,6 +911,14 @@ function addEntry() {
     render();
     renderHistory(); // Update history view
     clearFormFields();
+    // If auto-save is enabled, schedule an automatic push
+    try {
+        if (getConfig('autoSave')) {
+            autoSave();
+        }
+    } catch (e) {
+        // ignore config errors
+    }
     
     // Remove loading after a short delay
     setTimeout(() => {
@@ -1631,6 +1639,17 @@ window.onload = async () => {
     const r = localStorage.getItem('gt_repo');
     if (t) document.getElementById('cfg-token').value = t;
     if (r) document.getElementById('cfg-repo').value = r;
+    // Restore autosave checkbox from config
+    const autoCheckbox = document.getElementById('cfg-autosave');
+    if (autoCheckbox) {
+        try {
+            autoCheckbox.checked = !!getConfig('autoSave');
+        } catch (e) {
+            autoCheckbox.checked = false;
+        }
+    }
+    // Update UI to reflect autosave state (adds icons to publish buttons)
+    updateAutoSaveUI();
     
     // Load schema first
     const schemaLoaded = await loadSchema();

@@ -9,6 +9,7 @@ const DEFAULT_CONFIG = {
     // Application settings
     dateFormat: 'YYYY-MM-DD',
     autoFetch: true,  // Auto-fetch on load if credentials are saved
+    autoSave: false,  // Persist changes automatically when enabled by user
     
     // UI settings
     theme: 'dark',

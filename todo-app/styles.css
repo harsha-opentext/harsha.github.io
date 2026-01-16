@@ -12,6 +12,8 @@
     --danger: #ff3b30;
     --safe-area-top: env(safe-area-inset-top, 0px);
     --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
 }
 
 * {
@@ -39,7 +41,7 @@ body {
     position: sticky;
     top: 0;
     z-index: 100;
-    padding: 20px;
+    padding: calc(16px + var(--safe-area-top)) 20px 20px 20px;
 }
 
 .header-content {
@@ -63,7 +65,7 @@ body {
     border-radius: 10px;
     border: 1px solid var(--border);
     min-width: 220px;
-    font-size: 14px;
+    font-size: 16px; /* Prevent iOS Safari auto-zoom */
 }
 
 .search-input:focus {
@@ -110,6 +112,53 @@ body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+}
+
+/* Tag dropdown attached to the icon button */
+.tag-dropdown {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    min-width: 160px;
+    max-width: 260px;
+    padding: 8px;
+}
+.tag-dropdown .tag-option {
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--text);
+    font-size: 14px;
+}
+.tag-dropdown .tag-option:hover {
+    background: rgba(0,0,0,0.04);
+}
+.tag-dropdown .tag-option.selected {
+    background: var(--primary);
+    color: white;
+}
+
+/* Blink animation for tag-filter button to signal selection */
+.tag-blink {
+    animation: tag-blink 0.9s ease-in-out 1;
+}
+@keyframes tag-blink {
+    0% { transform: scale(1); box-shadow: none; }
+    25% { transform: scale(1.06); box-shadow: 0 6px 18px rgba(0,122,255,0.12); }
+    50% { transform: scale(0.98); box-shadow: 0 2px 8px rgba(0,122,255,0.08); }
+    100% { transform: scale(1); box-shadow: none; }
+}
+
+/* Persistent pulse-style blink while a tag filter is active */
+.tag-blink-pulse {
+    animation: tag-blink 0.9s ease-in-out infinite;
+}
+
+#clear-tag-filter-btn {
+    min-width: 40px;
+    min-height: 40px;
+    font-size: 16px;
 }
 
 .icon-btn:active {
@@ -281,6 +330,7 @@ button {
     padding: 16px;
     box-shadow: var(--shadow);
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 12px;
     transition: transform 0.15s, box-shadow 0.15s;
@@ -325,11 +375,82 @@ button {
     min-width: 0;
 }
 
+/* Ensure description panel sits below the main row and stretches full width */
+.todo-item .todo-description {
+    order: 99;
+    width: 100%;
+    flex-basis: 100%;
+    display: none; /* toggled from JS */
+    margin-top: 8px;
+    align-self: stretch;
+}
+.todo-item .desc-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+.todo-item .desc-preview {
+    width: 100%;
+    box-sizing: border-box;
+}
+
 .todo-text {
     font-size: 16px;
     color: var(--text);
     word-wrap: break-word;
     margin-bottom: 4px;
+}
+
+/* Star / Important button */
+.todo-description { margin-top: 8px; }
+.star-btn:active {
+    transform: scale(0.95);
+}
+
+/* Info (description) button */
+.desc-preview { font-size: 14px; color: var(--text); }
+.save-desc-btn, .cancel-desc-btn { padding: 8px 12px; border-radius: 10px; }
+.save-desc-btn { background: var(--primary); color: white; }
+.cancel-desc-btn { background: transparent; color: var(--text); border: 1px solid var(--border); }
+
+/* Markdown modal */
+.md-modal {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.35);
+    z-index: 2000;
+}
+.md-modal-content {
+    width: min(900px, 95%);
+    max-height: 80vh;
+    overflow: auto;
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: var(--shadow-lg);
+}
+.md-modal-header { display:flex; justify-content:flex-end; }
+.md-modal-body { padding-top: 8px; }
+
+.render-btn { font-size: 13px; padding: 8px 10px; border-radius: 8px; }
+
+/* Star button placed inside add card */
+#new-star-btn {
+    font-size: 20px;
+    align-self: center;
+    min-width: 44px;
+}
+
+/* Item star variant (beside edit) */
+.star-btn.item {
+    font-size: 18px;
+    min-width: 40px;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .todo-item.completed .todo-text {
@@ -588,9 +709,56 @@ button {
     
     .add-todo-card {
         flex-direction: column;
+        gap: 8px;
     }
     
     .btn-primary {
         width: 100%;
     }
 }
+
+/* iOS-friendly inputs and touch targets */
+input, select, textarea, button {
+    font-size: 16px;
+}
+
+input, select, textarea {
+    min-height: 44px;
+}
+
+button { min-height: 44px; }
+
+/* Log panel styles (copied from tracker for parity) */
+.log-panel {
+    position: fixed;
+    right: 12px;
+    top: 80px;
+    width: 360px;
+    max-height: calc(100vh - 120px);
+    background: var(--card-bg);
+    border-radius: 12px;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    z-index: 2500;
+    transition: transform 0.18s ease;
+}
+.log-panel[aria-hidden="true"] { transform: translateX(110%); }
+.log-panel[aria-hidden="false"] { transform: translateX(0); }
+.log-header-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 12px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 700;
+}
+.log-controls { display:flex; gap:8px; align-items:center; }
+.log-controls select { padding:6px 8px; border-radius:8px; border:1px solid var(--border); }
+.log-controls .log-icon-btn { background: transparent; border: none; cursor: pointer; padding: 6px 8px; font-size: 16px; }
+#log-screen { padding: 12px; overflow-y: auto; }
+.log-item { padding: 8px 10px; border-radius: 8px; margin-bottom: 8px; background: #f7f7f8; font-size: 13px; white-space: pre-wrap; }
+.log-error { border-left: 4px solid var(--danger); background: rgba(255,59,48,0.04); }
+.log-warn { border-left: 4px solid #ff9500; background: rgba(255,149,0,0.04); }
+.log-debug { border-left: 4px solid var(--primary); background: rgba(0,122,255,0.04); }

@@ -20,10 +20,15 @@
             <div class="search-wrapper">
                 <input id="searchInput" class="search-input" type="search" placeholder="Search tasks..." aria-label="Search tasks">
                 <button id="clearSearch" class="search-clear" title="Clear search">✕</button>
+                <button id="tag-filter-btn" class="icon-btn" title="Filter by tag">🏷️</button>
+                <button id="clear-tag-filter-btn" class="icon-btn" title="Clear tag filter" style="display:none;margin-left:6px;">✖️</button>
+                <div id="search-tag-dropdown" class="tag-dropdown" style="display:none; margin-left:8px;"></div>
             </div>
             <div class="header-actions">
                 <button class="icon-btn" onclick="fetchFromGit()" title="Fetch from GitHub">⬇️</button>
                 <button class="icon-btn" onclick="pushToGit()" title="Push to GitHub">📤</button>
+                <button class="icon-btn" onclick="toggleLogs()" title="Toggle Logs">🔍</button>
+                <button class="icon-btn" id="customize-btn" onclick="showCustomize()" title="Customize">🧩</button>
                 <button class="icon-btn" onclick="showSettings()" title="Settings">⚙️</button>
             </div>
         </div>
@@ -34,13 +39,39 @@
         <!-- Add Todo Form -->
         <div class="add-todo-card">
             <input type="text" id="todo-input" placeholder="What needs to be done?" class="todo-input" onkeypress="handleKeyPress(event)">
+            <button id="new-info-btn" class="icon-btn" title="Add description">i</button>
+            <button id="new-star-btn" class="star-btn" title="Mark important for new todo">☆</button>
             <button class="btn-primary" onclick="addTodo()">Add</button>
         </div>
+        <div id="new-desc-wrapper" style="display:none; margin-top:8px; max-width:800px; margin-left:auto; margin-right:auto;">
+            <textarea id="new-desc" placeholder="Add an optional description (Markdown supported)..." rows="3" style="width:100%; padding:10px; border-radius:10px; border:1px solid #ddd;"></textarea>
+            <div style="display:flex;justify-content:space-between;margin-top:6px;align-items:center;gap:8px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button id="render-new-desc" class="icon-btn" title="Render description">Render</button>
+                    <div style="color:var(--text-secondary); font-size:13px;">Supports Markdown</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <select id="new-tags-select" style="min-width:160px;"></select>
+                    <div style="color:var(--text-secondary); font-size:13px;"><span id="new-desc-count">0</span>/<span id="new-desc-max">2000</span></div>
+                </div>
+            </div>
+        </div>
+
+    <!-- Markdown Render Modal (read-only) -->
+    <div id="md-modal" class="md-modal" style="display:none;">
+        <div class="md-modal-content">
+            <div class="md-modal-header">
+                <button id="md-close" class="modal-close">✕</button>
+            </div>
+            <div id="md-body" class="md-modal-body"></div>
+        </div>
+    </div>
 
         <!-- Filter Tabs -->
         <div class="filter-tabs">
             <button class="filter-tab active" data-filter="all" onclick="setFilter('all')">All (<span id="count-all">0</span>)</button>
             <button class="filter-tab" data-filter="active" onclick="setFilter('active')">Active (<span id="count-active">0</span>)</button>
+            <button class="filter-tab" data-filter="important" onclick="setFilter('important')">Important (<span id="count-important">0</span>)</button>
             <button class="filter-tab" data-filter="completed" onclick="setFilter('completed')">Done (<span id="count-completed">0</span>)</button>
         </div>
 
@@ -56,6 +87,33 @@
             <p class="empty-subtitle">Add one above to get started!</p>
         </div>
     </main>
+
+    <!-- Log Panel (Slide-out) -->
+    <aside class="log-panel" id="log-panel" aria-hidden="true">
+        <div class="log-header-bar">
+            <span>🔍 System Logs</span>
+            <div class="log-controls">
+                <select id="log-level" onchange="updateLogLevel()" title="Log Level">
+                    <option value="debug">Debug</option>
+                    <option value="info" selected>Info</option>
+                    <option value="warn">Warn</option>
+                    <option value="error">Error</option>
+                </select>
+                <select id="log-retention" onchange="updateRetention()" title="Log Retention">
+                    <option value="2">2 min</option>
+                    <option value="5" selected>5 min</option>
+                    <option value="15">15 min</option>
+                    <option value="60">60 min</option>
+                    <option value="0">All</option>
+                </select>
+                <button onclick="saveLogs()" class="log-icon-btn" title="Save Logs to GitHub">💾</button>
+                <button onclick="copyLogs()" class="log-icon-btn" title="Copy Logs">📋</button>
+                <button onclick="clearLogs()" class="log-icon-btn" title="Clear Logs">🗑️</button>
+                <button onclick="toggleLogs()" class="log-icon-btn" title="Close">✕</button>
+            </div>
+        </div>
+        <div id="log-screen"></div>
+    </aside>
 
     <!-- Settings Modal -->
     <div id="settings-modal" class="modal" style="display: none;">
@@ -104,7 +162,36 @@
         </div>
     </div>
 
+    <!-- Customize Modal (tags) -->
+    <div id="customize-modal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🧩 Customize</h2>
+                <button onclick="closeCustomize()" class="modal-close">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h3>🏷️ Tags</h3>
+                    <p>Create up to <span id="max-tags-text"></span> tags. Default tag: <strong>in-progress</strong></p>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <input id="new-tag-input" class="form-input" placeholder="New tag name" style="flex:1; min-height:40px;" />
+                        <button class="btn-primary" id="create-tag-btn">Create</button>
+                    </div>
+                    <div style="margin-top:12px;">
+                        <button class="btn-secondary" id="clear-all-tags-btn">Clear All Tags</button>
+                    </div>
+                    <div id="tags-list" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/fuse.js@6.6.2/dist/fuse.min.js"></script>
-    <script src="app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+    <script src="app-core.js"></script>
+    <script src="storage.js"></script>
+    <script src="ui.js"></script>
+    <script src="events.js"></script>
 </body>
 </html>
