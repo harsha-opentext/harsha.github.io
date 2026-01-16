@@ -10,6 +10,7 @@ const DEFAULT_CONFIG = {
     dateFormat: 'YYYY-MM-DD',
     autoFetch: true,  // Auto-fetch on load if credentials are saved
     autoSave: false,  // Persist changes automatically when enabled by user
+    dailyBudget: 2000, // Default daily calorie budget (kcal)
     
     // UI settings
     theme: 'dark',

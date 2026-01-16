@@ -75,6 +75,16 @@
             <div class="stat-value" id="total-kcal">0 kcal</div>
         </div>
 
+        <div class="budget-card" style="margin-top:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-weight:600;">Daily Budget</div>
+                <div id="budget-values" style="font-size:13px; color:var(--text-secondary);">0 / 2000 kcal</div>
+            </div>
+            <div class="budget-bar-outer">
+                <div id="budget-bar-fill" class="budget-bar-fill" style="width: 0%;"></div>
+            </div>
+        </div>
+
         <div class="container" id="list-container"></div>
         
         <div class="form-panel">
@@ -203,6 +213,18 @@
             <p><strong>Version:</strong> 2.0.0</p>
             <p><strong>Data File:</strong> <code id="settings-datafile">data.json</code></p>
             <p><strong>Schema:</strong> <code id="settings-schema">Loading...</code></p>
+        </div>
+
+        <div class="settings-section">
+            <h3>🎯 Daily Budget</h3>
+            <div class="form-group">
+                <label>Daily Calorie Budget (kcal)</label>
+                <input type="number" id="cfg-daily-budget" placeholder="2000" class="form-input" min="0">
+            </div>
+            <div style="display:flex; gap:8px; margin-top:8px;">
+                <button class="btn-secondary" onclick="saveBudgetToRepo()">📤 Save Budget to Repo</button>
+            </div>
+            <p style="color: var(--text-secondary); font-size: 13px; margin-top:8px;">Set your target calories per day. The tracker will show a progress bar on the main screen. "Save Budget to Repo" writes budget to budget.json in your repo.</p>
         </div>
     </div>
 

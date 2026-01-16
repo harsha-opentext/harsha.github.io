@@ -198,6 +198,87 @@ function render() {
     }
 
     totalEl.innerText = `${total} ${totalField || 'total'}`;
+    // Update budget UI after recalculating total
+    try { updateBudgetUI(total); } catch (e) {}
+}
+
+function updateBudgetUI(todayTotal) {
+    const budget = parseInt(getConfig('dailyBudget') || 0, 10) || 0;
+    // Calculate total if not passed
+    let total = 0;
+    if (typeof todayTotal === 'number') {
+        total = todayTotal;
+    } else {
+        total = state.entries.reduce((s, e) => {
+            if (!isTodayEntry(e)) return s;
+            const c = parseFloat(e.calories);
+            return s + (isNaN(c) ? 0 : c);
+        }, 0);
+    }
+    const pct = budget > 0 ? Math.min(100, Math.round((total / budget) * 100)) : 0;
+    dbg(`Budget UI: total=${total} budget=${budget} pct=${pct}%`, 'debug');
+    const fill = document.getElementById('budget-bar-fill');
+    const vals = document.getElementById('budget-values');
+    if (fill) fill.style.width = pct + '%';
+    if (vals) vals.textContent = `${Math.round(total)} / ${budget} kcal`;
+    // Color warning if over budget
+    if (fill) {
+        if (total > budget) {
+            fill.style.background = 'linear-gradient(90deg, #ff3b30 0%, #ff7b7b 100%)';
+        } else {
+            fill.style.background = 'linear-gradient(90deg, #34c759 0%, #ffd60a 60%, #ff3b30 100%)';
+        }
+    }
+}
+
+async function saveBudgetToRepo() {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) {
+        alert('Missing GitHub credentials. Configure in Settings first.');
+        showPage('settings');
+        return;
+    }
+
+    const budgetInput = document.getElementById('cfg-daily-budget');
+    const budget = budgetInput ? parseInt(budgetInput.value, 10) : getConfig('dailyBudget');
+    if (isNaN(budget) || budget <= 0) {
+        alert('Please enter a valid daily budget value before saving to repo.');
+        return;
+    }
+
+    const dataFile = 'budget.json';
+    const url = `https://api.github.com/repos/${repo}/contents/${dataFile}`;
+    const body = {
+        message: `Budget: ${new Date().toISOString()}`,
+        content: btoa(unescape(encodeURIComponent(JSON.stringify({ dailyBudget: budget }, null, 2))))
+    };
+
+    // Try to fetch existing file to include SHA
+    try {
+        const getRes = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+        if (getRes.ok) {
+            const j = await getRes.json();
+            if (j.sha) body.sha = j.sha;
+        }
+    } catch (e) { /* ignore */ }
+
+    try {
+        const res = await fetch(url, { method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (res.ok) {
+            const json = await res.json();
+            setConfig('dailyBudget', budget);
+            showNotification('Budget saved to repo ✅');
+            dbg('Budget saved to GitHub', 'info');
+        } else {
+            const err = await res.json();
+            dbg('Failed to save budget: ' + (err.message || res.statusText), 'error', err);
+            alert('Failed to save budget to repo. Check logs.');
+        }
+    } catch (err) {
+        dbg('Save budget error: ' + err.message, 'error');
+        alert('Error saving budget to repo. Check logs.');
+    }
 }
 
 // Debug helper: dump entry matching info (only when debug enabled)
@@ -710,10 +791,13 @@ function saveSettings() {
     const r = document.getElementById('cfg-repo').value.trim();
     const autoSaveCheckbox = document.getElementById('cfg-autosave');
     const autoSave = autoSaveCheckbox ? autoSaveCheckbox.checked : false;
+    const dailyBudgetInput = document.getElementById('cfg-daily-budget');
+    const dailyBudget = dailyBudgetInput ? parseInt(dailyBudgetInput.value, 10) : null;
     
     localStorage.setItem('gt_token', t);
     localStorage.setItem('gt_repo', r);
     setConfig('autoSave', autoSave);
+    if (!isNaN(dailyBudget) && dailyBudget > 0) setConfig('dailyBudget', dailyBudget);
     
     updateAutoSaveUI();
     dbg("Settings saved");
@@ -1845,6 +1929,15 @@ window.onload = async () => {
     }
     // Update UI to reflect autosave state (adds icons to publish buttons)
     updateAutoSaveUI();
+
+    // Restore daily budget input
+    const budgetInput = document.getElementById('cfg-daily-budget');
+    if (budgetInput) {
+        try {
+            const b = getConfig('dailyBudget');
+            if (b) budgetInput.value = b;
+        } catch (e) { /* ignore */ }
+    }
     
     // Load schema first
     const schemaLoaded = await loadSchema();
@@ -1866,6 +1959,7 @@ window.onload = async () => {
     // Ensure date button and tracker render initialize even if no fetch occurs
     try {
         updateDateButton();
+        updateBudgetUI();
         render();
     } catch (e) { /* ignore if DOM not ready */ }
 

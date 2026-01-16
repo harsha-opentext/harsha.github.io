@@ -173,6 +173,25 @@ body, html {
     font-weight: 700;
 }
 
+.budget-card {
+    background: var(--card-bg);
+    padding: 12px;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+}
+.budget-bar-outer {
+    width: 100%;
+    height: 14px;
+    background: #f2f2f7;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.budget-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #34c759 0%, #ffd60a 60%, #ff3b30 100%);
+    width: 0%;
+    transition: width 300ms ease;
+}
 .history-stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
