@@ -39,7 +39,7 @@
         <!-- Add Todo Form -->
         <div class="add-todo-card">
             <input type="text" id="todo-input" placeholder="What needs to be done?" class="todo-input" onkeypress="handleKeyPress(event)">
-            <button id="new-info-btn" class="icon-btn" title="Add description">i</button>
+            <button id="new-info-btn" class="icon-btn" title="Add description">ℹ️</button>
             <button id="new-star-btn" class="star-btn" title="Mark important for new todo">☆</button>
             <button class="btn-primary" onclick="addTodo()">Add</button>
         </div>
@@ -51,6 +51,13 @@
                     <div style="color:var(--text-secondary); font-size:13px;">Supports Markdown</div>
                 </div>
                 <div style="display:flex;align-items:center;gap:8px;">
+                    <select id="new-expire-select" title="Set expiry (days)" style="min-width:140px;">
+                        <option value="">No expiry</option>
+                        <option value="1">Expire in 1 day</option>
+                        <option value="3">Expire in 3 days</option>
+                        <option value="7">Expire in 7 days</option>
+                        <option value="14">Expire in 14 days</option>
+                    </select>
                     <select id="new-tags-select" style="min-width:160px;"></select>
                     <div style="color:var(--text-secondary); font-size:13px;"><span id="new-desc-count">0</span>/<span id="new-desc-max">2000</span></div>
                 </div>

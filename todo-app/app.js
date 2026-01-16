@@ -515,6 +515,19 @@ function addTodo() {
         tags: (() => { const s = document.getElementById('new-tags-select'); return s && s.value ? [s.value] : []; })(),
         createdAt: new Date().toISOString()
     };
+
+    // Handle expiry: allow setting expires in N days via #new-expire-select
+    try {
+        const expireSelect = document.getElementById('new-expire-select');
+        if (expireSelect && expireSelect.value) {
+            const days = parseInt(expireSelect.value, 10);
+            if (!isNaN(days) && days > 0) {
+                const expires = new Date();
+                expires.setDate(expires.getDate() + days);
+                todo.expiresAt = expires.toISOString();
+            }
+        }
+    } catch (e) { /* ignore */ }
     
     state.todos.unshift(todo);
     state.hasUnsavedChanges = true;
@@ -527,6 +540,8 @@ function addTodo() {
         const wrapper = document.getElementById('new-desc-wrapper'); if (wrapper) wrapper.style.display = 'none';
     }
     if (newStar) { newStar.classList.remove('starred'); newStar.textContent = '☆'; }
+    // Reset expiry select
+    const expireSelect = document.getElementById('new-expire-select'); if (expireSelect) expireSelect.value = '';
     const newInfoBtn = document.getElementById('new-info-btn'); if (newInfoBtn) {/* no visual toggle for info button */}
     
     rebuildFuse();

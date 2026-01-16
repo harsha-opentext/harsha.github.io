@@ -173,14 +173,22 @@ function render() {
                 </div>
             `;
         } else {
+            // Determine expiry display
+            const expiresAt = todo.expiresAt ? new Date(todo.expiresAt) : null;
+            const now = new Date();
+            const isExpired = expiresAt ? (expiresAt.getTime() < now.getTime()) : false;
+            const expiredClass = isExpired ? ' expired' : '';
+            const expiryLabel = expiresAt ? `<div style="font-size:12px; color:${isExpired ? '#ff3b30' : 'var(--text-secondary)'}; margin-top:4px;">Expires: ${formatDate(expiresAt.toISOString())}</div>` : '';
+
             return `
-                <div class="todo-item ${todo.completed ? 'completed' : ''}">
+                <div class="todo-item ${todo.completed ? 'completed' : ''}${expiredClass}">
                     <button class="checkbox ${todo.completed ? 'checked' : ''}" onclick="toggleTodo(${todo.id})">
                         ${todo.completed ? '✓' : ''}
                     </button>
                     <div class="todo-content">
                         <div class="todo-text">${escapeHtml(todo.text)}</div>
                         <div class="todo-date">${formatDate(todo.createdAt)}</div>
+                        ${expiryLabel}
                     </div>
                     <button class="edit-btn" data-id="${todo.id}">✏️</button>
                     <button class="star-btn item ${todo.important ? 'starred' : ''}" data-id="${todo.id}" title="Mark important">${todo.important ? '★' : '☆'}</button>

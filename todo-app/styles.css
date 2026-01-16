@@ -188,8 +188,8 @@ body {
 .todo-input {
     flex: 1;
     padding: 12px 16px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 14px;
     font-size: 16px;
     font-family: inherit;
     min-height: 44px;
@@ -443,6 +443,24 @@ button {
     min-width: 44px;
 }
 
+/* Make the info button visually consistent with other icon buttons */
+#new-info-btn {
+    background: #fbfdfe;
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,0.04);
+    cursor: pointer;
+    font-size: 16px;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#new-info-btn:active { background: #f2f2f7; transform: scale(0.98); }
+
 /* Item star variant (beside edit) */
 .star-btn.item {
     font-size: 18px;
@@ -455,6 +473,18 @@ button {
 
 .todo-item.completed .todo-text {
     text-decoration: line-through;
+}
+
+/* Expired tasks styling */
+.todo-item.expired {
+    border: 1px solid rgba(255,59,48,0.12);
+    box-shadow: 0 2px 12px rgba(255,59,48,0.04);
+}
+.todo-item.expired .todo-text {
+    color: var(--danger);
+}
+.todo-item.expired .todo-date {
+    color: #bf3b30;
 }
 
 .todo-date {
@@ -724,6 +754,24 @@ input, select, textarea, button {
 
 input, select, textarea {
     min-height: 44px;
+}
+
+/* Make inline selects in add card visually consistent */
+.add-todo-card select {
+    background: #fbfdfe;
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 14px;
+    color: var(--text);
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.add-todo-card select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 6px 18px rgba(0,122,255,0.06);
 }
 
 button { min-height: 44px; }
