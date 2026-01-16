@@ -296,6 +296,26 @@
         </div>
     </div>
 
+    <!-- Time Picker Modal (iPhone-alarm like) -->
+    <div id="time-picker-modal" class="modal" style="display:none;">
+        <div class="modal-content" style="max-width:320px;">
+            <div class="modal-header">
+                <h2>🕰️ Select Time</h2>
+                <button onclick="closeTimePicker()" class="modal-close">✕</button>
+            </div>
+            <div class="modal-body" style="display:flex; gap:12px; justify-content:center; align-items:center; padding: 20px;">
+                <select id="tp-hour" style="font-size:20px; padding:8px;">
+                </select>
+                <span style="font-size:20px;">:</span>
+                <select id="tp-minute" style="font-size:20px; padding:8px;">
+                </select>
+            </div>
+            <div style="padding: 16px; display:flex; gap:8px; justify-content: flex-end;">
+                <button class="btn-secondary" onclick="closeTimePicker()">Cancel</button>
+                <button class="btn-primary" onclick="confirmTimePicker()">Set</button>
+            </div>
+        </div>
+    </div>
     <script src="app.js"></script>
 </body>
 </html>
