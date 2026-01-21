@@ -69,127 +69,6 @@ function updateDateButton() {
     btn.textContent = getTodayString();
 }
 
-// Helper: format a Date (or timestamp) into local YYYY-MM-DD
-function formatDateLocal(input) {
-    const d = new Date(input);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-}
-
-function getTodayString() {
-    const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-}
-
-function isTodayEntry(entry) {
-    // Use canonical date logic to determine if this entry is for today.
-    if (!entry) return false;
-    const today = getTodayString();
-    const ed = getEntryDate(entry);
-    return ed === today;
-}
-
-function render() {
-    const container = document.getElementById('list-container');
-    const totalEl = document.getElementById('total-kcal');
-    updateDateButton();
-    
-    if (!state.schema) {
-        container.innerHTML = '<p>Loading schema...</p>';
-        return;
-    }
-    
-    container.innerHTML = '';
-    let total = 0;
-    let renderedCount = 0;
-    const totalField = state.schema.totalField;
-
-    // Only show entries for today on the add-entry / tracker view
-    const totalEntries = state.entries.length;
-    let todayMatches = 0;
-    state.entries.forEach((entry) => { if (isTodayEntry(entry)) todayMatches++; });
-    dbg(`Rendering tracker: ${todayMatches} / ${totalEntries} entries match today's date (${getTodayString()})`, 'debug');
-
-    // If nothing shows for today but we have entries, dump per-entry date info to help debug
-    if (todayMatches === 0 && totalEntries > 0) {
-        dbg('No entries classified as today; dumping per-entry date info', 'warn');
-        state.entries.forEach((entry, idx) => {
-            try {
-                const ed = getEntryDate(entry);
-                dbg(`Entry[${idx}] getEntryDate=${ed} raw.date=${entry.date || 'n/a'} timestamp=${entry.timestamp || 'n/a'}`, 'debug', entry);
-            } catch (e) {
-                dbg(`Error inspecting entry[${idx}]: ${e.message}`, 'error');
-            }
-        });
-    }
-
-    state.entries.forEach((entry, index) => {
-        if (!isTodayEntry(entry)) return; // skip non-today entries but keep global index
-
-        renderedCount++;
-
-        if (totalField && entry[totalField]) {
-            total += parseFloat(entry[totalField]);
-        }
-        
-        const d = document.createElement('div');
-        d.className = 'entry-card';
-        if (state.selectMode && state.selectedEntries.has(index)) {
-            d.style.background = 'rgba(0, 122, 255, 0.1)';
-            d.style.borderLeft = '4px solid var(--primary)';
-        }
-        
-        // Format display based on schema displayFormat
-        let display = state.schema.displayFormat;
-        Object.keys(entry).forEach(key => {
-            display = display.replace(`{${key}}`, entry[key]);
-        });
-        
-        // Check if entry has macros
-        const hasMacros = entry.protein || entry.carbs || entry.fat;
-        let macroHtml = '';
-        if (hasMacros) {
-            const macros = [];
-            if (entry.protein) macros.push(`Protein: ${entry.protein}g`);
-            if (entry.carbs) macros.push(`Carbs: ${entry.carbs}g`);
-            if (entry.fat) macros.push(`Fat: ${entry.fat}g`);
-            macroHtml = `
-                <div id="macros-${index}" style="display: none; margin-top: 8px; padding: 8px; background: var(--bg); border-radius: 6px; font-size: 12px; color: var(--text-secondary);">
-                    ${macros.join(' | ')}
-                </div>
-            `;
-        }
-        
-        const checkbox = state.selectMode ? `<input type="checkbox" ${state.selectedEntries.has(index) ? 'checked' : ''} onchange="toggleEntrySelection(${index})" style="width: 20px; height: 20px; cursor: pointer;">` : '';
-        const expandBtn = hasMacros && !state.selectMode ? `<button onclick="toggleMacros(${index})" style="background: var(--bg); border: 1px solid var(--border); cursor: pointer; font-size: 16px; padding: 6px 10px; border-radius: 8px; color: var(--primary); font-weight: bold; transition: all 0.2s;" onmouseover="this.style.background='var(--primary)'; this.style.color='white';" onmouseout="this.style.background='var(--bg)'; this.style.color='var(--primary)';">▶</button>` : '';
-        const deleteBtn = !state.selectMode ? `<button onclick="deleteEntry(${index})" style="background: #ff3b30; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">Delete</button>` : '';
-        
-        d.innerHTML = `
-            <div style="display: flex; gap: 12px; align-items: center; width: 100%;">
-                ${checkbox}
-                ${expandBtn}
-                <span style="flex: 1;">${display}</span>
-                ${deleteBtn}
-            </div>
-            ${macroHtml}
-        `;
-        container.appendChild(d);
-    });
-
-    if (renderedCount === 0) {
-        container.innerHTML = '<div style="padding:18px; color:var(--text-secondary);">No entries for today. Add your first entry using the form above.</div>';
-    }
-
-    totalEl.innerText = `${total} ${totalField || 'total'}`;
-    // Update budget UI after recalculating total
-    try { updateBudgetUI(total); } catch (e) {}
-}
-
 function updateBudgetUI(todayTotal) {
     const budget = parseInt(getConfig('dailyBudget') || 0, 10) || 0;
     // Calculate total if not passed
@@ -305,6 +184,153 @@ function pruneLogs() {
         screen.appendChild(el);
     }
 }
+
+// --- Chunked Log Writer + Auto-Log Scheduler ---
+// State pointer for logs already written to remote chunks
+state.logWriteIndex = state.logWriteIndex || 0;
+let autoLogTimer = null;
+
+const DEFAULT_LOG_FOLDER = getConfig('logFolder') || 'logs';
+
+function getAutoLogIntervalMinutes() {
+    const v = parseInt(getConfig('autoLogIntervalMinutes') || 0, 10);
+    // default to 3 minutes if not configured or invalid
+    return (isNaN(v) || v <= 0) ? 3 : v;
+}
+
+async function listLogChunks() {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) return [];
+    const url = `https://api.github.com/repos/${repo}/contents/${DEFAULT_LOG_FOLDER}`;
+    try {
+        const res = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+        if (!res.ok) return [];
+        const items = await res.json();
+        // items contain `name`, `size`, `sha` etc. Return sorted by name/time
+        return (items || []).filter(it => it.type === 'file').sort((a, b) => a.name.localeCompare(b.name));
+    } catch (e) {
+        dbg(`listLogChunks error: ${e.message}`, 'error');
+        return [];
+    }
+}
+
+function chooseChunkFilename(existingItems, chunkSize) {
+    // Use date-based prefix and incremental numeric suffix
+    const datePrefix = new Date().toISOString().slice(0,10); // YYYY-MM-DD
+    // Find existing items for today
+    const todays = existingItems.filter(it => it.name.startsWith(datePrefix));
+    if (todays.length === 0) {
+        return `${datePrefix}-part-0.log`;
+    }
+    // Get last part index
+    const last = todays[todays.length - 1].name;
+    const m = last.match(/-part-(\d+)\.log$/);
+    let idx = m ? parseInt(m[1], 10) : todays.length - 1;
+    // If last file size + chunkSize > max, roll to next index
+    const lastSize = todays[todays.length - 1].size || 0;
+    const maxSize = parseInt(getConfig('maxLogFileSize') || 50000, 10) || 50000;
+    if (lastSize + chunkSize > maxSize) idx = idx + 1;
+    return `${datePrefix}-part-${idx}.log`;
+}
+
+async function writeLogChunk(chunkText) {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) {
+        dbg('Cannot write log chunk: Missing credentials', 'error');
+        return false;
+    }
+
+    // Ensure log folder exists by attempting to list it; GitHub will return 404 if missing.
+    let items = await listLogChunks();
+    // Determine filename based on sizes without downloading file contents
+    const chunkSize = new TextEncoder().encode(chunkText).length;
+    const filename = chooseChunkFilename(items, chunkSize);
+    const filePath = `${DEFAULT_LOG_FOLDER}/${filename}`;
+    const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+
+    const body = {
+        message: `Log chunk: ${filename}`,
+        content: btoa(unescape(encodeURIComponent(chunkText)))
+    };
+
+    try {
+        const putRes = await fetch(url, { method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (putRes.ok) {
+            const txt = await putRes.text().catch(() => '');
+            dbg(`Wrote log chunk ${filePath}`, 'info');
+            return true;
+        } else {
+            const txt = await putRes.text().catch(() => '');
+            let err = {};
+            try { err = JSON.parse(txt); } catch (e) { err = { message: txt }; }
+            dbg(`Failed to write log chunk ${filePath}: ${err.message || putRes.statusText}`, 'error', err);
+            return false;
+        }
+    } catch (e) {
+        dbg(`writeLogChunk error: ${e.message}`, 'error');
+        return false;
+    }
+}
+
+async function saveLogsChunked() {
+    // Writes any new logs since last write in one chunk file (no reading of existing log files)
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) {
+        dbg('Cannot save logs: Missing credentials', 'warn');
+        return false;
+    }
+
+    const maxSize = parseInt(getConfig('maxLogFileSize') || 50000, 10) || 50000;
+
+    // Nothing to write
+    if (!state.logs || state.logs.length <= state.logWriteIndex) {
+        dbg('No new logs to write', 'debug');
+        return true;
+    }
+
+    // Build chunk from new logs only
+    const newLogs = state.logs.slice(state.logWriteIndex);
+    const chunkText = `=== Logs chunked at ${new Date().toISOString()} ===\n` + newLogs.map(l => l.text).join('\n\n');
+
+    // Decide filename using list sizes
+    const items = await listLogChunks();
+    const filename = chooseChunkFilename(items, new TextEncoder().encode(chunkText).length);
+
+    const ok = await writeLogChunk(chunkText);
+    if (ok) {
+        // Advance pointer so we don't rewrite same logs
+        state.logWriteIndex = state.logs.length;
+        dbg(`Saved ${newLogs.length} log entries as chunk ${filename}`, 'info');
+        return true;
+    } else {
+        dbg('Failed to write log chunk', 'error');
+        return false;
+    }
+}
+
+function startAutoLog() {
+    stopAutoLog();
+    const mins = getAutoLogIntervalMinutes();
+    dbg(`Starting auto-log every ${mins} minute(s)`, 'info');
+    autoLogTimer = setInterval(() => {
+        // Fire-and-forget; errors logged internally
+        saveLogsChunked();
+    }, mins * 60 * 1000);
+}
+
+function stopAutoLog() {
+    if (autoLogTimer) {
+        clearInterval(autoLogTimer);
+        autoLogTimer = null;
+        dbg('Auto-log stopped', 'info');
+    }
+}
+
+// Initialize auto-log on startup (if configured)
+try { startAutoLog(); } catch (e) { dbg(`Auto-log init failed: ${e.message}`, 'error'); }
 
 function showNotification(message) {
     const notification = document.createElement('div');
@@ -832,6 +858,24 @@ function autoSave() {
 }
 
 async function fetchFromGit(onlyToday = false) {
+    // Helper: fetch with timeout using AbortController to avoid hanging requests
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const res = await fetch(url, { ...options, signal: controller.signal });
+            return res;
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                dbg(`Fetch aborted (timeout): ${url}`, 'warn');
+            } else {
+                dbg(`Fetch error for ${url}: ${err.message}`, 'error');
+            }
+            throw err;
+        } finally {
+            clearTimeout(id);
+        }
+    }
     const token = localStorage.getItem('gt_token');
     const repo = localStorage.getItem('gt_repo');
 
@@ -859,7 +903,7 @@ async function fetchFromGit(onlyToday = false) {
             const fileUrl = `https://api.github.com/repos/${repo}/contents/${filePath}`;
             dbg(`Fetching only today's file: ${fileUrl}`, 'debug');
             try {
-                const r = await fetch(fileUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+                const r = await fetchWithTimeout(fileUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } }, 15000);
                 dbg(`Today's file fetch status: ${r.status}`, 'debug');
                 if (r.ok) {
                     const j = await r.json();
@@ -907,7 +951,7 @@ async function fetchFromGit(onlyToday = false) {
         const listUrl = `https://api.github.com/repos/${repo}/contents/${dataFolder}`;
         dbg(`Listing folder: ${listUrl}`, 'debug');
         try {
-            const listRes = await fetch(listUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+            const listRes = await fetchWithTimeout(listUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } }, 15000);
             dbg(`Folder list status: ${listRes.status}`, 'debug');
                 if (listRes.ok) {
                 const items = await listRes.json();
@@ -928,7 +972,7 @@ async function fetchFromGit(onlyToday = false) {
                     const chunk = toFetch.slice(i, i + CHUNK);
                     const promises = chunk.map(async (it) => {
                         try {
-                            const r = await fetch(it.url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+                            const r = await fetchWithTimeout(it.url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } }, 15000);
                             dbg(`Fetching file ${it.name} status: ${r.status}`, 'debug');
                             if (!r.ok) {
                                 dbg(`Failed to fetch ${it.name}: ${r.status}`, 'warn');
