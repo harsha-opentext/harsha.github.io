@@ -41,9 +41,9 @@ schema:
 **Authentication:** Uses Personal Access Token stored in localStorage (no backend authentication).
 
 **Key Functions:**
-- `fetchFromGit()` ([app.js](../app.js#L307)) - GET from GitHub Contents API
-- `pushToGit()` ([app.js](../app.js#L360)) - PUT with base64-encoded JSON content
-- **SHA tracking:** `state.sha` is critical - must be included in PUT requests to update existing files
+- `fetchFromGit()` ([app.js](../app.js#L307)) - GET per-day files from the GitHub Contents API (or a single day's file when requested)
+- `pushEntryForDate()` / `pushEntriesByDate()` - helpers that PUT per-day JSON files under `data/<YYYY-MM-DD>.json` (base64-encoded content)
+- **SHA tracking:** `state.fileIndex` maps date strings to file SHAs for updates to existing per-day files
 
 **Important:** Base64 encode/decode is done with `btoa()`/`atob()` native functions.
 
@@ -107,7 +107,31 @@ function getConfig(key) {
 }
 ```
 
-Users can override `dataFile`, `schemaFile`, `logRetentionMinutes` without editing code.
+Users can override `dataFolder`, `schemaFile`, `logRetentionMinutes` without editing code.
+
+## Environment Variables (CI / Local terminal)
+
+You can also provide GitHub credentials and the target repo via environment variables for local checks and scripts:
+
+- `GITHUB_TOKEN`: A GitHub Personal Access Token with `repo` permissions.
+- `GITHUB_REPO_PATH`: The repository path in the form `owner/repo` (for example `harsha-opentext/private-data`).
+
+Example (macOS / Linux):
+
+```bash
+export GITHUB_TOKEN="ghp_..."
+export GITHUB_REPO_PATH="owner/repo"
+```
+
+Example curl to decode today's per-day file locally (uses environment variables above):
+
+```bash
+DATE=$(date +%F)
+curl -s -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/${GITHUB_REPO_PATH}/contents/data/${DATE}.json" \
+  | python3 -c "import sys,json,base64; j=json.load(sys.stdin); print(base64.b64decode(j.get('content','')).decode('utf-8'))" | sed -n '1,200p'
+```
+
+Put these exports into your shell profile or CI secrets when running automated checks.
 
 ## Common Patterns
 
@@ -124,8 +148,8 @@ Users can override `dataFile`, `schemaFile`, `logRetentionMinutes` without editi
 - Error shows in both main container and form panel with setup instructions
 
 **404 on first GitHub fetch:**
-- Normal behavior - `data.json` doesn't exist yet
-- App will create file on first push with commit message "Sync: <timestamp>"
+- Normal behavior - per-day file for a given date may not exist yet (e.g., `data/2026-01-21.json`).
+- The app will create the per-day file on first sync for that date.
 
 ## Testing Checklist
 

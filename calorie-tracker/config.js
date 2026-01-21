@@ -1,15 +1,16 @@
 // Default configuration - these values can be overridden in localStorage
 const DEFAULT_CONFIG = {
     // GitHub repository settings
-    dataFile: 'data.json',  // File name in the repository to store data
+    dataFolder: 'data',     // Per-day files will be written under this folder
     schemaFile: 'schema.yaml',  // Schema definition file
     logFile: 'logs.txt',  // Log file name in repository
     maxLogFileSize: 1048576,  // Max log file size in bytes (1MB)
+    fetchDays: 90, // Default number of recent per-date files to fetch
     
     // Application settings
     dateFormat: 'YYYY-MM-DD',
     autoFetch: true,  // Auto-fetch on load if credentials are saved
-    autoSave: false,  // Persist changes automatically when enabled by user
+    autoSave: true,  // Persist changes automatically (always enabled)
     dailyBudget: 2000, // Default daily calorie budget (kcal)
     
     // UI settings

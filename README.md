@@ -49,15 +49,15 @@ A sophisticated web app for tracking data with GitHub as the backend storage. Fe
    - Change display format and total field
 
 4. **Configure Settings** (Optional)
-   - Edit `config.js` to change defaults
-   - Modify `dataFile` to use a different filename
-   - Adjust UI settings like theme and log retention
+  - Edit `config.js` to change defaults
+  - Configure `dataFolder` to change where per-day files are stored (default: `data`)
+  - Adjust UI settings like theme and log retention
 
 ## Usage
 
 1. **Add Data**: Fill in the form fields and click "Add Locally"
 2. **Fetch from GitHub**: Click "Fetch Git" to load existing data
-3. **Save to GitHub**: Click "Push to GitHub" to sync
+3. **Save to GitHub**: Data is automatically synced to GitHub as per-day files under the `data/` folder; manual "Push" has been removed.
 4. **View Logs**: Click "📋 LOGS" to see debug information
 5. **Delete Entries**: Click "Delete" button on any entry
 
@@ -118,7 +118,7 @@ The app will be available at `https://username.github.io/repo-name/`
 ## Configuration Options
 
 ### config.js
-- `dataFile`: Filename in repo for data storage (default: `data.json`)
+- `dataFolder`: Folder in repo for per-day files (default: `data`, files created as `data/<YYYY-MM-DD>.json`)
 - `schemaFile`: Schema definition file (default: `schema.yaml`)
 - `dateFormat`: Date format for display
 - `autoFetch`: Auto-load data on startup
