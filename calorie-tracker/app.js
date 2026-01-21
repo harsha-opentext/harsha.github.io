@@ -1,8 +1,15 @@
-let state = { 
-    entries: [], 
-    sha: "", 
-    logs: [], 
-    retentionMinutes: 5, 
+// Allow tests to inject initial state via window.__initialState (merged with defaults)
+const _defaultState = {
+    entries: [],
+    sha: "",
+    // Per-day storage index: map date (YYYY-MM-DD) -> array of entries
+    dateIndex: {},
+    // Track remote SHAs for per-day files so updates include correct sha
+    perDaySha: {},
+    logs: [],
+    // Active write operations counter to prevent concurrent fetch clobbering
+    syncCounter: 0,
+    retentionMinutes: 5,
     schema: null,
     logLevel: 'info', // debug, info, warn, error
     dateRangeStart: null,
@@ -15,8 +22,24 @@ let state = {
     tempCsvData: null,
     csvSource: null,
     autoSyncing: false
-    
 };
+
+let state = typeof window !== 'undefined' && window.__initialState ? Object.assign({}, _defaultState, window.__initialState) : Object.assign({}, _defaultState);
+
+// Debounced auto-push: collect changed days and push automatically after quiet period
+let _autoPushTimer = null;
+function autoPushChangedDays(delayMs = 800) {
+    if (_autoPushTimer) clearTimeout(_autoPushTimer);
+    _autoPushTimer = setTimeout(async () => {
+        try {
+            // Only push if there are unsaved changes
+            if (!state.hasUnsavedChanges) return;
+            dbg('autoPushChangedDays: triggered auto-push for unsaved changes', 'info');
+            // Call pushToGit but without requiring a user event
+            await pushToGit();
+        } catch (e) { dbg('autoPushChangedDays error: ' + e.message, 'error'); }
+    }, delayMs);
+}
 
 const LOG_LEVELS = {
     debug: 0,
@@ -49,6 +72,71 @@ function dbg(msg, type = 'info', raw = null) {
         state.logs.unshift({ ts: Date.now(), text, type });
         pruneLogs();
     } catch (e) { /* ignore */ }
+}
+
+// Simple toast helper (non-blocking, top-right)
+function showToast(message, type = 'info', timeout = 3000) {
+    try {
+        let container = document.getElementById('toast-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toast-container';
+            container.style.position = 'fixed';
+            container.style.top = '16px';
+            container.style.right = '16px';
+            container.style.zIndex = 99999;
+            container.style.display = 'flex';
+            container.style.flexDirection = 'column';
+            container.style.gap = '8px';
+            document.body.appendChild(container);
+        }
+        const t = document.createElement('div');
+        t.className = `toast toast-${type}`;
+        t.textContent = message;
+        t.style.minWidth = '200px';
+        t.style.maxWidth = '360px';
+        t.style.padding = '10px 12px';
+        t.style.borderRadius = '8px';
+        t.style.boxShadow = '0 6px 16px rgba(0,0,0,0.12)';
+        t.style.color = '#fff';
+        t.style.fontSize = '13px';
+        t.style.opacity = '0.95';
+        t.style.transition = 'transform 220ms ease, opacity 220ms ease';
+        t.style.transform = 'translateX(8px)';
+        if (type === 'error') t.style.background = '#ff3b30';
+        else if (type === 'success') t.style.background = '#34c759';
+        else if (type === 'warn') t.style.background = '#ff9500';
+        else t.style.background = '#333';
+        container.appendChild(t);
+        // entrance
+        requestAnimationFrame(() => { t.style.transform = 'translateX(0)'; });
+        const tid = setTimeout(() => {
+            t.style.opacity = '0';
+            t.style.transform = 'translateX(8px)';
+            setTimeout(() => { try { t.remove(); } catch(e){} }, 220);
+        }, timeout);
+        // allow manual dismiss on click
+        t.addEventListener('click', () => { clearTimeout(tid); t.style.opacity = '0'; setTimeout(() => { try { t.remove(); } catch(e){} }, 220); });
+    } catch (e) { dbg('showToast error: ' + e.message, 'error'); }
+}
+
+// Unified notification helper: uses non-blocking toasts and console.debug when tests set gt_test_mode
+function notify(message, type = 'info') {
+    try {
+        const testMode = localStorage.getItem('gt_test_mode') === '1' || window.__TEST_MODE === true;
+        if (testMode) {
+            try { console.debug('[notify]', type, message); } catch(e){}
+            // still push to logs
+            dbg(message, type);
+            return;
+        }
+        // In normal mode, show toast and fallback to alert for critical messages
+        showToast(message, type, 4000);
+        if (type === 'error' || type === 'warn') {
+            // Also show blocking alert for now in non-test mode to surface important errors
+            try { alert(message); } catch (e) { /* ignore */ }
+        }
+    } catch (e) { try { console.debug('notify error', e); } catch(_){} }
 }
 
 function toggleViewMode() {
@@ -135,14 +223,21 @@ function render() {
     const totalField = state.schema.totalField;
 
     // Only show entries for today on the add-entry / tracker view
-    const totalEntries = state.entries.length;
-    let todayMatches = 0;
-    state.entries.forEach((entry) => { if (isTodayEntry(entry)) todayMatches++; });
-    dbg(`Rendering tracker: ${todayMatches} / ${totalEntries} entries match today's date (${getTodayString()})`, 'debug');
+    const todayStr = getTodayString();
+    let todaysEntries = [];
+    let perDayMode = false;
+    if (state.dateIndex && state.dateIndex[todayStr] && Array.isArray(state.dateIndex[todayStr])) {
+        perDayMode = true;
+        todaysEntries = state.dateIndex[todayStr];
+    } else {
+        // Fallback: build today's entries from the global entries array
+        todaysEntries = state.entries.filter(e => isTodayEntry(e));
+    }
 
-    state.entries.forEach((entry, index) => {
-        if (!isTodayEntry(entry)) return; // skip non-today entries but keep global index
+    dbg(`Rendering tracker: ${todaysEntries.length} / ${state.entries.length} entries match today's date (${todayStr}) (perDayMode=${perDayMode})`, 'debug');
 
+    // Render today's entries (either from per-day index or global entries)
+    todaysEntries.forEach((entry, localIndex) => {
         renderedCount++;
 
         if (totalField && entry[totalField]) {
@@ -151,7 +246,7 @@ function render() {
         
         const d = document.createElement('div');
         d.className = 'entry-card';
-        if (state.selectMode && state.selectedEntries.has(index)) {
+        if (state.selectMode && state.selectedEntries.has(localIndex)) {
             d.style.background = 'rgba(0, 122, 255, 0.1)';
             d.style.borderLeft = '4px solid var(--primary)';
         }
@@ -171,21 +266,23 @@ function render() {
             if (entry.carbs) macros.push(`Carbs: ${entry.carbs}g`);
             if (entry.fat) macros.push(`Fat: ${entry.fat}g`);
             macroHtml = `
-                <div id="macros-${index}" style="display: none; margin-top: 8px; padding: 8px; background: var(--bg); border-radius: 6px; font-size: 12px; color: var(--text-secondary);">
+                <div id="macros-${localIndex}" style="display: none; margin-top: 8px; padding: 8px; background: var(--bg); border-radius: 6px; font-size: 12px; color: var(--text-secondary);">
                     ${macros.join(' | ')}
                 </div>
             `;
         }
         
-        const checkbox = state.selectMode ? `<input type="checkbox" ${state.selectedEntries.has(index) ? 'checked' : ''} onchange="toggleEntrySelection(${index})" style="width: 20px; height: 20px; cursor: pointer;">` : '';
-        const expandBtn = hasMacros && !state.selectMode ? `<button onclick="toggleMacros(${index})" style="background: var(--bg); border: 1px solid var(--border); cursor: pointer; font-size: 16px; padding: 6px 10px; border-radius: 8px; color: var(--primary); font-weight: bold; transition: all 0.2s;" onmouseover="this.style.background='var(--primary)'; this.style.color='white';" onmouseout="this.style.background='var(--bg)'; this.style.color='var(--primary)';">▶</button>` : '';
-        const deleteBtn = !state.selectMode ? `<button onclick="deleteEntry(${index})" style="background: #ff3b30; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">Delete</button>` : '';
-        
+        // For per-day mode, localIndex refers to index within today's array; otherwise localIndex corresponds to a filtered array
+        const checkbox = state.selectMode ? `<input type="checkbox" ${state.selectedEntries.has(localIndex) ? 'checked' : ''} onchange="toggleEntrySelection(${localIndex})" style="width: 20px; height: 20px; cursor: pointer;">` : '';
+        const expandBtn = hasMacros && !state.selectMode ? `<button onclick="toggleMacros(${localIndex})" style="background: var(--bg); border: 1px solid var(--border); cursor: pointer; font-size: 16px; padding: 6px 10px; border-radius: 8px; color: var(--primary); font-weight: bold; transition: all 0.2s;" onmouseover="this.style.background='var(--primary)'; this.style.color='white';" onmouseout="this.style.background='var(--bg)'; this.style.color='var(--primary)';">▶</button>` : '';
+        const unsavedBadge = (!entry._published) ? `<span style="background:#ffd60a; color:#1c1c1e; padding:4px 8px; border-radius:12px; font-size:12px; margin-left:8px;">Unsaved</span>` : '';
+        const deleteBtn = !state.selectMode ? (perDayMode ? `<button onclick="deletePerDayEntry('${todayStr}', ${localIndex})" style="background: #ff3b30; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">Delete</button>` : `<button onclick="deleteEntry(${localIndex})" style="background: #ff3b30; color: white; border: none; padding: 5px 10px; border-radius: 5px; cursor: pointer;">Delete</button>`) : '';
+
         d.innerHTML = `
             <div style="display: flex; gap: 12px; align-items: center; width: 100%;">
                 ${checkbox}
                 ${expandBtn}
-                <span style="flex: 1;">${display}</span>
+                <span style="flex: 1;">${display} ${unsavedBadge}</span>
                 ${deleteBtn}
             </div>
             ${macroHtml}
@@ -235,7 +332,7 @@ async function saveBudgetToRepo() {
     const token = localStorage.getItem('gt_token');
     const repo = localStorage.getItem('gt_repo');
     if (!token || !repo) {
-        alert('Missing GitHub credentials. Configure in Settings first.');
+        notify('Missing GitHub credentials. Configure in Settings first.', 'error');
         showPage('settings');
         return;
     }
@@ -243,42 +340,34 @@ async function saveBudgetToRepo() {
     const budgetInput = document.getElementById('cfg-daily-budget');
     const budget = budgetInput ? parseInt(budgetInput.value, 10) : getConfig('dailyBudget');
     if (isNaN(budget) || budget <= 0) {
-        alert('Please enter a valid daily budget value before saving to repo.');
+        notify('Please enter a valid daily budget value before saving to repo.', 'warn');
         return;
     }
 
     const dataFile = 'budget.json';
-    const url = `https://api.github.com/repos/${repo}/contents/${dataFile}`;
-    const body = {
-        message: `Budget: ${new Date().toISOString()}`,
-        content: btoa(unescape(encodeURIComponent(JSON.stringify({ dailyBudget: budget }, null, 2))))
-    };
-
-    // Try to fetch existing file to include SHA
-    try {
-        const getRes = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
-        if (getRes.ok) {
-            const j = await getRes.json();
-            if (j.sha) body.sha = j.sha;
-        }
-    } catch (e) { /* ignore */ }
-
-    try {
-        const res = await fetch(url, { method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        if (res.ok) {
-            const json = await res.json();
-            setConfig('dailyBudget', budget);
-            showNotification('Budget saved to repo ✅');
-            dbg('Budget saved to GitHub', 'info');
-        } else {
-            const err = await res.json();
-            dbg('Failed to save budget: ' + (err.message || res.statusText), 'error', err);
-            alert('Failed to save budget to repo. Check logs.');
-        }
-    } catch (err) {
-        dbg('Save budget error: ' + err.message, 'error');
-        alert('Error saving budget to repo. Check logs.');
+    // Use GitHubDB if available
+    if (window.GitHubDB && window.GitHubDB.putFile && window.GitHubDB.getFile) {
+        try {
+            const getRes = await window.GitHubDB.getFile(dataFile);
+            const existingSha = getRes && getRes.ok ? getRes.sha : undefined;
+            const putRes = await window.GitHubDB.putFile(dataFile, JSON.stringify({ dailyBudget: budget }, null, 2), `Budget: ${new Date().toISOString()}`, existingSha);
+            if (putRes && putRes.ok) {
+                setConfig('dailyBudget', budget);
+                showNotification('Budget saved to repo ✅');
+                dbg('Budget saved to GitHub', 'info');
+                return;
+            } else {
+                dbg('Failed to save budget via GitHubDB', 'error', putRes && putRes.body ? putRes.body : putRes);
+                notify('Failed to save budget to repo. Check logs.', 'error');
+                return;
+            }
+        } catch (e) { dbg('Save budget (GitHubDB) error: ' + e.message, 'error'); notify('Error saving budget to repo. Check logs.', 'error'); return; }
     }
+
+    // We no longer use direct fetch fallbacks — require GitHubDB module
+    dbg('GitHubDB module not available to save budget (direct fetch removed)', 'error');
+    notify('Internal error: GitHub DB module not loaded. Please refresh the page.', 'error');
+    return;
 }
 
 // Debug helper: dump entry matching info (only when debug enabled)
@@ -376,94 +465,61 @@ async function saveLogs() {
     
     const logFile = getConfig('logFile');
     const maxSize = getConfig('maxLogFileSize');
-    const url = `https://api.github.com/repos/${repo}/contents/${logFile}`;
-    
     dbg('Saving logs to GitHub...', 'info');
-    
     const saveBtn = event?.target;
     if (saveBtn) saveBtn.classList.add('loading');
-    
+
+    if (!(window.GitHubDB && window.GitHubDB.getFile && window.GitHubDB.putFile)) {
+        dbg('GitHubDB unavailable for saveLogs', 'error');
+        alert('Internal error: GitHub DB module not loaded. Please refresh the page.');
+        if (saveBtn) saveBtn.classList.remove('loading');
+        return;
+    }
+
     try {
         // Prepare new log content
         const timestamp = new Date().toISOString();
-        const newLogContent = `\n\n=== Logs saved at ${timestamp} ===\n` + 
-            state.logs.map(l => l.text).join('\n');
-        
-        // Try to fetch existing log file
+        const newLogContent = `\n\n=== Logs saved at ${timestamp} ===\n` + state.logs.map(l => l.text).join('\n');
+
+        // Fetch existing log file via GitHubDB
         let existingContent = '';
         let fileSha = null;
-        
         try {
-            const response = await fetch(url, {
-                method: 'GET',
-                headers: { 
-                    'Authorization': `Bearer ${token}`,
-                    'Accept': 'application/vnd.github.v3+json'
-                }
-            });
-            
-            if (response.ok) {
-                const data = await response.json();
-                fileSha = data.sha;
-                existingContent = atob(data.content);
+            const getRes = await window.GitHubDB.getFile(logFile);
+            if (getRes && getRes.ok) {
+                fileSha = getRes.sha;
+                existingContent = getRes.content || '';
                 dbg(`Existing log file size: ${existingContent.length} bytes`, 'debug');
             }
         } catch (err) {
             dbg('No existing log file found, will create new one', 'debug');
         }
-        
-        // Determine if we should append or overwrite
+
+        // Determine final content
         let finalContent;
-        let action;
-        
         if (existingContent && (existingContent.length + newLogContent.length) < maxSize) {
-            // Append to existing
             finalContent = existingContent + newLogContent;
-            action = 'appended';
             dbg('Appending to existing log file', 'debug');
         } else if (existingContent && existingContent.length >= maxSize) {
-            // Size limit reached, start fresh
             finalContent = `=== Log file reset due to size limit (${maxSize} bytes) ===\n` + newLogContent;
-            action = 'reset and written';
             dbg('Log file size limit reached, resetting', 'warn');
         } else {
-            // New file or small append that would exceed limit
             finalContent = newLogContent;
-            action = 'created';
             dbg('Creating new log file', 'debug');
         }
-        
-        // Push to GitHub
-        const body = {
-            message: `Update logs: ${timestamp}`,
-            content: btoa(finalContent)
-        };
-        
-        if (fileSha) {
-            body.sha = fileSha;
-        }
-        
-        const res = await fetch(url, {
-            method: 'PUT',
-            headers: { 
-                'Authorization': `Bearer ${token}`, 
-                'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify(body)
-        });
-        
-        if (res.ok) {
-            dbg(`Logs successfully ${action} to ${logFile}`, 'info');
-            dbg(`Final size: ${finalContent.length} bytes`, 'debug');
-            alert(`Logs saved to ${logFile}!`);
+
+        // Push via GitHubDB
+        const putRes = await window.GitHubDB.putFile(logFile, finalContent, `Logs: ${new Date().toISOString()}`, fileSha);
+        if (putRes && putRes.ok) {
+            dbg('Logs saved to GitHub', 'info');
+            showNotification('Logs saved to repo ✅');
         } else {
-            const err = await res.json();
-            dbg(`Failed to save logs: ${err.message}`, 'error', err);
-            alert('Failed to save logs. Check the logs panel for details.');
+            dbg('Failed to save logs via GitHubDB', 'error', putRes && putRes.body ? putRes.body : putRes);
+            alert('Failed to save logs to repo. Check logs.');
         }
     } catch (err) {
-        dbg(`Error saving logs: ${err.message}`, 'error');
-        alert('Error saving logs. Check the logs panel for details.');
+        dbg('saveLogs error: ' + err.message, 'error');
+        alert('Error saving logs to repo. Check logs.');
     } finally {
         if (saveBtn) saveBtn.classList.remove('loading');
     }
@@ -499,8 +555,10 @@ function showPage(p) {
         // Update settings display
         const dataFileEl = document.getElementById('settings-datafile');
         const schemaEl = document.getElementById('settings-schema');
-        if (dataFileEl) dataFileEl.innerText = getConfig('dataFile');
-        if (schemaEl) schemaEl.innerText = state.schema ? state.schema.displayName : 'Loading...';
+        if (dataFileEl) {
+            if (window.GitHubPerDayAPI) dataFileEl.innerText = 'Per-day (tracker/data/)';
+            else dataFileEl.innerText = getConfig('dataFile');
+        }
     }
 }
 
@@ -807,7 +865,7 @@ function saveSettings() {
 
 function updateAutoSaveUI() {
     const autoSave = getConfig('autoSave');
-    const pushBtns = document.querySelectorAll('[onclick="pushToGit()"]');
+    const pushBtns = document.querySelectorAll('.push-btn');
     
     pushBtns.forEach(btn => {
         if (autoSave) {
@@ -841,6 +899,8 @@ function autoSave() {
 }
 
 async function fetchFromGit() {
+    if (state.fetchingFromGit) { dbg('fetchFromGit: already running, skipping duplicate call', 'debug'); return; }
+    state.fetchingFromGit = true;
     const token = localStorage.getItem('gt_token');
     const repo = localStorage.getItem('gt_repo');
 
@@ -853,51 +913,55 @@ async function fetchFromGit() {
     }
 
     const dataFile = getConfig('dataFile');
-    const url = `https://api.github.com/repos/${repo}/contents/${dataFile}`;
     
     dbg(`Fetching data from GitHub`, 'info');
     dbg(`Repository: ${repo}`, 'debug');
     dbg(`Data file: ${dataFile}`, 'debug');
-    dbg(`URL: ${url}`, 'debug');
+    dbg(`GitHubPerDayAPI present: ${!!(window.GitHubPerDayAPI && window.GitHubPerDayAPI.listDateFiles)}`, 'debug');
 
     try {
         // Optional: show a small loading marker on the first fetch button
         const activeBtn = document.querySelector('[onclick="fetchFromGit()"]');
         if (activeBtn) activeBtn.classList.add('loading');
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: { 
-                'Authorization': `Bearer ${token}`,
-                'Accept': 'application/vnd.github.v3+json'
-            }
-        });
 
-        dbg(`Response status: ${response.status}`, 'debug');
-
-        if (!response.ok) {
-            if (response.status === 404) {
-                dbg("Data file not found - will create on first push", "warn");
+        // If a write is in progress, skip fetch to avoid clobbering optimistic local changes
+        if (state.syncCounter && state.syncCounter > 0) {
+            dbg('fetchFromGit: write operations in progress, skipping fetch to avoid clobber', 'debug');
+            return;
+        }
+        // First, detect whether the repo is using per-day files (tracker/data/)
+        if (window.GitHubPerDayAPI && window.GitHubPerDayAPI.listDateFiles && window.GitHubPerDayAPI.fetchDateFile) {
+            try {
+                const files = await window.GitHubPerDayAPI.listDateFiles();
+                if (Array.isArray(files) && files.length > 0) {
+                    dbg(`Per-day storage detected (${files.length} files). Loading per-day index...`, 'info');
+                    await fetchAllDateFiles();
+                    return;
+                } else {
+                    dbg('No per-day files found. This app requires per-day storage; not falling back to monolithic file.', 'warn');
+                    // Do not fall back to the monolithic data file — enforce per-day workflow
+                    state.entries = [];
+                    state.sha = null;
+                    render();
+                    return;
+                }
+            } catch (e) {
+                dbg('Per-day detection failed: ' + (e && e.message ? e.message : e), 'error');
+                // On detection error, avoid falling back — keep entries empty and surface error
                 state.entries = [];
+                state.sha = null;
                 render();
                 return;
             }
-            const errBody = await response.json();
-            dbg(`GitHub API error: ${errBody.message || response.statusText}`, "error", errBody);
+        } else {
+            dbg('GitHubPerDayAPI unavailable — cannot detect per-day storage. App requires per-day storage and will not fall back.', 'error');
+            alert('GitHub per-day API module not loaded. Please refresh the page.');
+            state.entries = [];
+            state.sha = null;
+            render();
             return;
         }
-
-        const data = await response.json();
-        state.sha = data.sha;
-        dbg(`Retrieved file SHA: ${state.sha.substring(0, 8)}...`, 'debug');
-        
-        const content = atob(data.content);
-        dbg(`Content decoded, size: ${content.length} bytes`, 'debug');
-        
-        state.entries = JSON.parse(content);
-        render();
-        // Note: not caching locally in this build
-        dbg(`Successfully loaded ${state.entries.length} entries`, 'info');
-
+    }
     } catch (err) {
         dbg(`Fetch error: ${err.message}`, "error");
         dbg(`Stack trace: ${err.stack}`, 'debug');
@@ -905,6 +969,7 @@ async function fetchFromGit() {
     finally {
         const activeBtn = document.querySelector('[onclick="fetchFromGit()"]');
         if (activeBtn) activeBtn.classList.remove('loading');
+        state.fetchingFromGit = false;
     }
 }
 
@@ -916,65 +981,189 @@ async function pushToGit() {
     
     if (!token || !repo) {
         dbg("Cannot push: Missing credentials", "error");
+        notify('Missing GitHub credentials. Configure in Settings first.', 'error');
         return;
     }
 
-    const dataFile = getConfig('dataFile');
-    const jsonContent = JSON.stringify(state.entries, null, 2);
-    const url = `https://api.github.com/repos/${repo}/contents/${dataFile}`;
-
-    dbg(`Pushing ${state.entries.length} entries to GitHub`, 'info');
-    dbg(`Data size: ${jsonContent.length} bytes`, 'debug');
+    dbg(`Pushing ${state.entries.length} entries to GitHub (per-day files)`, 'info');
     
     // Add loading state to push button
     const pushBtn = event?.target;
     if (pushBtn) pushBtn.classList.add('loading');
 
     try {
-        const body = {
-            message: "Sync: " + new Date().toISOString(),
-            content: btoa(unescape(encodeURIComponent(jsonContent)))
-        };
-        
-        // Include SHA only if we have it (for updates)
-        if (state.sha) {
-            body.sha = state.sha;
-            dbg(`Updating existing file (SHA: ${state.sha.substring(0, 8)}...)`, 'debug');
+        // Build a map of dateStr -> entries BUT only include days with unsaved entries
+        const groups = {};
+        let results = [];
+        function dateForEntry(e) {
+            if (e.date) return e.date;
+            if (e.timestamp) return formatDateLocal(e.timestamp);
+            return getTodayString();
+        }
+        // Prefer using state.dateIndex when available (per-day arrays), otherwise fall back to state.entries
+        if (state.dateIndex && Object.keys(state.dateIndex).length > 0) {
+            for (const [d, arr] of Object.entries(state.dateIndex)) {
+                // include only if any entry in this day is not published
+                if (Array.isArray(arr) && arr.some(it => !it._published)) {
+                    groups[d] = arr;
+                }
+            }
         } else {
-            dbg('Creating new file', 'debug');
+            state.entries.forEach(e => {
+                const d = dateForEntry(e);
+                if (!groups[d]) groups[d] = [];
+                groups[d].push(e);
+            });
+            // Filter groups to only unsaved
+            for (const k of Object.keys(groups)) {
+                if (!groups[k].some(it => !it._published)) delete groups[k];
+            }
         }
 
-        const res = await fetch(url, {
-            method: 'PUT',
-            headers: { 
-                'Authorization': `Bearer ${token}`, 
-                'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify(body)
-        });
+        if (!(window.GitHubPerDayAPI && window.GitHubPerDayAPI.writeDateFile)) {
+            dbg('GitHubPerDayAPI.writeDateFile unavailable — cannot push per-day files', 'error');
+            notify('Internal error: Per-day GitHub API module not loaded. Please refresh the page.', 'error');
+            return;
+        }
 
-        if (res.ok) {
-            const json = await res.json();
-            state.sha = json.content.sha;
+        for (const dateStr of Object.keys(groups).sort()) {
+            dbg(`pushToGit: writing ${groups[dateStr].length} entries to tracker/data/${dateStr}.json`, 'debug');
+            try {
+                const ok = await writeDateFile(dateStr, groups[dateStr]);
+                results.push({ date: dateStr, ok });
+                if (!ok) dbg(`pushToGit: write failed for ${dateStr}`, 'error');
+            } catch (e) {
+                dbg(`pushToGit error for ${dateStr}: ${e.message}`, 'error');
+                results.push({ date: dateStr, ok: false, error: e.message });
+            }
+        }
+
+        const failed = results.filter(r => !r.ok);
+        if (failed.length === 0) {
             state.hasUnsavedChanges = false;
-            dbg("Successfully saved to GitHub", 'info');
-            dbg(`New SHA: ${state.sha.substring(0, 8)}...`, 'debug');
-            // No local caching performed in this build
-            
-            // Format nice success message
+            dbg('Successfully saved all per-day files to GitHub', 'info');
             const [owner, repoName] = repo.split('/');
-            alert(`✅ Successfully published!\n\n📁 Repository: ${repoName}\n👤 Owner: ${owner}\n📄 File: ${dataFile}\n\n${state.entries.length} entries saved`);
+            notify(`✅ Successfully published per-day files!\n\n📁 Repository: ${repoName}\n👤 Owner: ${owner}\n\n${Object.keys(groups).length} files updated`, 'success');
         } else {
-            const err = await res.json();
-            dbg(`Push failed: ${err.message || 'Unknown error'}`, "error", err);
-            alert("❌ Failed to publish. Check logs for details.");
+            dbg(`pushToGit: ${failed.length} files failed to persist`, 'error', failed);
+            notify(`❌ Failed to publish ${failed.length} files. Check logs for details.`, 'error');
         }
+        try { console.debug('[pushToGit] results:', JSON.stringify(results)); } catch(e){}
+        return results;
     } catch (err) {
         dbg(`Push error: ${err.message}`, "error");
-        alert("❌ Failed to publish. Check logs for details.");
+        notify("❌ Failed to publish. Check logs for details.", 'error');
     } finally {
         if (pushBtn) pushBtn.classList.remove('loading');
     }
+}
+
+// Per-day GitHub helpers are provided by calorie-tracker/tools/github-perday-api.js
+// Wrapper delegations to the shared module (exposed as window.GitHubPerDayAPI)
+async function fetchAllDateFiles() {
+    if (window.GitHubPerDayAPI && window.GitHubPerDayAPI.listDateFiles && window.GitHubPerDayAPI.fetchDateFile) {
+        dbg('Delegating fetchAllDateFiles to GitHubPerDayAPI', 'debug');
+        const files = await window.GitHubPerDayAPI.listDateFiles();
+        const loaded = {};
+        const shas = {};
+        for (const f of files) {
+            const key = f.name.replace('.json','');
+            const res = await window.GitHubPerDayAPI.fetchDateFile(key);
+            if (res && Array.isArray(res.entries)) {
+                // Mark entries loaded from GitHub as published so they don't show Unsaved badge
+                try {
+                    res.entries.forEach(e => { e._published = true; });
+                } catch (err) {
+                    dbg(`fetchAllDateFiles: failed to mark entries published for ${key}: ${err.message}`, 'warn');
+                }
+                loaded[key] = res.entries;
+                shas[key] = res.sha;
+            }
+        }
+        state.dateIndex = loaded;
+        state.perDaySha = shas;
+        state.entries = Object.keys(state.dateIndex).sort().reduce((acc,d)=>acc.concat(state.dateIndex[d]), []);
+        dbg(`fetchAllDateFiles (delegated): total entries ${state.entries.length}`, 'info');
+        // Update per-day status UI
+        try {
+            const statusEl = document.getElementById('perday-status');
+            const todayStr = getTodayString();
+            const todayEntries = state.dateIndex[todayStr] ? state.dateIndex[todayStr].length : 0;
+            if (statusEl) statusEl.innerText = `Per-day: ${Object.keys(state.dateIndex).length} files, today: ${todayEntries} entries`;
+        } catch (e) { /* ignore UI update failures */ }
+        render();
+    } else {
+        dbg('GitHubPerDayAPI not available; fetchAllDateFiles skipped', 'warn');
+    }
+}
+
+async function writeDateFile(dateStr, entries) {
+    if (window.GitHubPerDayAPI && window.GitHubPerDayAPI.writeDateFile) {
+        const existingSha = state.perDaySha ? state.perDaySha[dateStr] : undefined;
+        dbg(`writeDateFile: writing ${dateStr} (existingSha=${existingSha || 'none'})`, 'debug');
+        // Increment sync counter so fetchFromGit can avoid running concurrently
+        state.syncCounter = (state.syncCounter || 0) + 1;
+        let res;
+        try {
+            res = await window.GitHubPerDayAPI.writeDateFile(dateStr, entries, existingSha);
+        } finally {
+            state.syncCounter = Math.max(0, (state.syncCounter || 1) - 1);
+        }
+        dbg(`writeDateFile: response for ${dateStr}: ${JSON.stringify(res).slice(0,300)}`, 'debug');
+        if (res && res.ok && res.sha) {
+            state.perDaySha[dateStr] = res.sha;
+            // Mark entries as published in the in-memory index
+            try {
+                if (state.dateIndex && state.dateIndex[dateStr]) {
+                    state.dateIndex[dateStr].forEach(e => { e._published = true; });
+                }
+                // Also ensure flattened entries referencing these items are marked published
+                try {
+                    state.entries.forEach(e => {
+                        const ed = e.date || (e.timestamp ? formatDateLocal(e.timestamp) : undefined);
+                        if (ed === dateStr) e._published = true;
+                    });
+                } catch (inner) { dbg(`writeDateFile: failed to mark flattened entries published: ${inner.message}`, 'debug'); }
+                // Recompute hasUnsavedChanges conservatively
+                try {
+                    state.hasUnsavedChanges = state.entries.some(e => !e._published);
+                } catch (inner) { dbg(`writeDateFile: failed to recompute unsaved flag: ${inner.message}`, 'debug'); }
+            } catch (e) { dbg(`writeDateFile: failed to mark published: ${e.message}`, 'warn'); }
+            // Re-render to update UI badges
+            try { render(); renderHistory(); } catch (e) {}
+            return true;
+        }
+
+        // If we got a 409 conflict, attempt to fetch the latest file, merge, and retry once
+        if (res && res.status === 409) {
+            dbg(`writeDateFile: 409 conflict for ${dateStr}, fetching latest file and retrying`, 'warn');
+            try {
+                const latest = await window.GitHubPerDayAPI.fetchDateFile(dateStr);
+                if (latest && Array.isArray(latest.entries)) {
+                    // Replace in-memory index with latest entries from repo
+                    state.dateIndex[dateStr] = latest.entries.map(e => ({ ...e, _published: true }));
+                    state.perDaySha[dateStr] = latest.sha;
+                    // Rebuild flat entries and render to show latest remote state
+                    state.entries = Object.keys(state.dateIndex).sort().reduce((acc,d)=>acc.concat(state.dateIndex[d]), []);
+                    render(); renderHistory();
+                    // Retry write once with latest sha
+                    dbg(`writeDateFile: retrying write for ${dateStr} with new sha ${latest.sha}`, 'debug');
+                    const retryRes = await window.GitHubPerDayAPI.writeDateFile(dateStr, entries, latest.sha);
+                    dbg(`writeDateFile: retry response for ${dateStr}: ${JSON.stringify(retryRes).slice(0,300)}`, 'debug');
+                    if (retryRes && retryRes.ok && retryRes.sha) {
+                        state.perDaySha[dateStr] = retryRes.sha;
+                        if (state.dateIndex && state.dateIndex[dateStr]) state.dateIndex[dateStr].forEach(e => { e._published = true; });
+                        try { render(); renderHistory(); } catch (e) {}
+                        return true;
+                    }
+                }
+            } catch (e) { dbg(`writeDateFile: retry after 409 failed: ${e.message}`, 'error'); }
+        }
+
+        return false;
+    }
+    dbg('GitHubPerDayAPI.writeDateFile not available', 'warn');
+    return false;
 }
 
 // NOTE: The original all-entries render implementation was removed.
@@ -985,6 +1174,7 @@ function deleteEntry(index) {
     if (confirm('Delete this entry?')) {
         state.entries.splice(index, 1);
         state.hasUnsavedChanges = true;
+        autoPushChangedDays();
         render();
         
         // Auto-save if enabled
@@ -1053,6 +1243,58 @@ function selectAll() {
     render();
 }
 
+async function deletePerDayEntry(dateStr, index) {
+    if (!confirm('Delete this entry?')) return;
+    if (!state.dateIndex || !state.dateIndex[dateStr]) return;
+    const entries = state.dateIndex[dateStr];
+    if (index < 0 || index >= entries.length) return;
+    // Make a shallow copy backup in case we need to rollback
+    const backup = entries.slice();
+    // Remove the item optimistically
+    entries.splice(index, 1);
+    state.dateIndex[dateStr] = entries;
+    // Update flattened entries for global views
+    state.entries = Object.keys(state.dateIndex).sort().reduce((acc,d)=>acc.concat(state.dateIndex[d]), []);
+    state.hasUnsavedChanges = true;
+    autoPushChangedDays();
+    render();
+
+    // Persist change. If write fails, rollback and inform user.
+    try {
+        dbg(`deletePerDayEntry: persisting ${dateStr} with ${entries.length} items`, 'debug');
+        dbg(`deletePerDayEntry: before persist - entries for ${dateStr}: ${JSON.stringify(backup).slice(0,400)}`, 'debug');
+        const ok = await writeDateFile(dateStr, entries);
+        dbg(`deletePerDayEntry: write result for ${dateStr}: ${ok}`,'debug');
+        if (!ok) {
+            dbg('deletePerDayEntry: failed to persist per-day delete, rolling back', 'error');
+            // Rollback
+            state.dateIndex[dateStr] = backup;
+            state.entries = Object.keys(state.dateIndex).sort().reduce((acc,d)=>acc.concat(state.dateIndex[d]), []);
+            state.hasUnsavedChanges = true;
+            autoPushChangedDays();
+            render();
+            notify('Failed to persist delete to repository. Your entry has been restored locally. Check logs for details.', 'error');
+        } else {
+            // Rebuild flattened entries and re-render to ensure UI shows the deletion immediately
+            state.entries = Object.keys(state.dateIndex).sort().reduce((acc,d)=>acc.concat(state.dateIndex[d]), []);
+            dbg(`deletePerDayEntry: after persist - entries for ${dateStr}: ${JSON.stringify(state.dateIndex[dateStr]).slice(0,400)}`, 'debug');
+            state.hasUnsavedChanges = false;
+            render();
+            renderHistory();
+            dbg('deletePerDayEntry: delete persisted successfully and UI refreshed', 'info');
+        }
+    } catch (e) {
+        dbg('deletePerDayEntry error: ' + e.message, 'error');
+        // Rollback
+        state.dateIndex[dateStr] = backup;
+        state.entries = Object.keys(state.dateIndex).sort().reduce((acc,d)=>acc.concat(state.dateIndex[d]), []);
+        state.hasUnsavedChanges = true;
+        autoPushChangedDays();
+        render();
+            notify('Error while deleting entry: ' + e.message, 'error');
+    }
+}
+
 function updateSelectedCount() {
     const countEl = document.getElementById('selected-count');
     if (countEl) countEl.textContent = state.selectedEntries.size;
@@ -1076,6 +1318,7 @@ function bulkDelete() {
     
     state.selectedEntries.clear();
     state.hasUnsavedChanges = true;
+    autoPushChangedDays();
     updateSelectedCount();
     render();
     renderHistory();
@@ -1135,8 +1378,20 @@ function addEntry() {
     const addBtn = event?.target;
     if (addBtn) addBtn.classList.add('loading');
     
+    // Optimistically update in-memory state for immediate UI feedback
+    const todayStr = getTodayString();
+    // Ensure date field is set on the entry for historical indexing
+    data.date = data.date || todayStr;
+    // treat new entries as saved by default; show error and remove if persist fails
+    data._published = true;
+
+    // Insert into per-day index
+    if (!state.dateIndex[todayStr]) state.dateIndex[todayStr] = [];
+    state.dateIndex[todayStr].push(data);
+
+    // Also keep the flattened entries list for history views
     state.entries.push(data);
-    state.hasUnsavedChanges = true;
+    // reflect immediately in UI
     render();
     renderHistory(); // Update history view
     clearFormFields();
@@ -1153,6 +1408,34 @@ function addEntry() {
     setTimeout(() => {
         if (addBtn) addBtn.classList.remove('loading');
     }, 500);
+
+    // Persist today's file to GitHub immediately. If it fails, remove the entry and notify via toast.
+    (async () => {
+        try {
+            const entriesToWrite = state.dateIndex[todayStr].slice();
+            const ok = await writeDateFile(todayStr, entriesToWrite);
+            if (!ok) throw new Error('writeDateFile returned false');
+            dbg(`addEntry: persisted ${entriesToWrite.length} entries for ${todayStr}`, 'info');
+            showToast('Entry saved', 'success', 2000);
+        } catch (err) {
+            dbg('Failed to persist new entry to per-day file: ' + (err && err.message ? err.message : err), 'error');
+            // Remove the entry we added and refresh UI
+            try {
+                const di = state.dateIndex[todayStr];
+                if (di) {
+                    const idx = di.lastIndexOf(data);
+                    if (idx !== -1) di.splice(idx, 1);
+                    if (di.length === 0) delete state.dateIndex[todayStr];
+                }
+                const eidx = state.entries.lastIndexOf(data);
+                if (eidx !== -1) state.entries.splice(eidx, 1);
+                // Recompute unsaved flag
+                state.hasUnsavedChanges = state.entries.some(e => !e._published);
+                render(); renderHistory();
+            } catch (e) { dbg('Rollback failed: ' + e.message, 'error'); }
+            showToast('Failed to save entry — entry removed', 'error', 5000);
+        }
+    })();
 }
 
 // --- HISTORY PAGE ---
@@ -1505,6 +1788,7 @@ function historyBulkDelete() {
     
     state.historySelectedEntries.clear();
     state.hasUnsavedChanges = true;
+    autoPushChangedDays();
     updateHistorySelectedCount();
     render();
     renderHistory();
@@ -1633,6 +1917,7 @@ function saveEdit(index) {
     dbg(`Entry ${index} updated`, 'info');
     // Mark as changed and auto-save if configured
     state.hasUnsavedChanges = true;
+    autoPushChangedDays();
     try {
         if (getConfig('autoSave')) autoSave();
     } catch (e) {}
@@ -1642,6 +1927,7 @@ function deleteEntryGlobal(index) {
     if (confirm('Delete this entry?')) {
         state.entries.splice(index, 1);
         state.hasUnsavedChanges = true;
+        autoPushChangedDays();
         render();
         renderHistory();
         try { if (getConfig('autoSave')) autoSave(); } catch (e) {}
@@ -1897,7 +2183,7 @@ async function copyCsvToClipboard() {
         textarea.select();
         try {
             document.execCommand('copy');
-            alert('CSV copied to clipboard!');
+            notify('CSV copied to clipboard!', 'success');
             closeCsvExportModal();
             
             // Exit select mode
@@ -1907,7 +2193,7 @@ async function copyCsvToClipboard() {
                 toggleHistorySelectMode();
             }
         } catch (e) {
-            alert('Failed to copy. Please try the download option.');
+            notify('Failed to copy. Please try the download option.', 'error');
         }
         textarea.remove();
     }
@@ -2006,7 +2292,7 @@ function parseCsv() {
     const input = document.getElementById('csv-input').value.trim();
     
     if (!input) {
-        alert('Please paste CSV data first.');
+        notify('Please paste CSV data first.', 'warn');
         return;
     }
     
@@ -2014,7 +2300,7 @@ function parseCsv() {
         const lines = input.split('\n').map(line => line.trim()).filter(line => line.length > 0);
 
         if (lines.length < 1) {
-            alert('CSV input is empty.');
+            notify('CSV input is empty.', 'warn');
             return;
         }
 
@@ -2034,7 +2320,7 @@ function parseCsv() {
             const requiredCols = ['date', 'calories'];
             const missingCols = requiredCols.filter(col => !header.some(h => h.includes(col)));
             if (missingCols.length > 0) {
-                alert(`Missing required columns in header: ${missingCols.join(', ')}`);
+                notify(`Missing required columns in header: ${missingCols.join(', ')}`, 'warn');
                 return;
             }
         } else {
@@ -2115,7 +2401,7 @@ function parseCsv() {
         }
         
         if (csvParsedData.length === 0) {
-            alert('No valid entries found in CSV.');
+            notify('No valid entries found in CSV.', 'warn');
             return;
         }
         
@@ -2124,19 +2410,19 @@ function parseCsv() {
         
     } catch (err) {
         dbg(`CSV parse error: ${err.message}`, 'error');
-        alert('Failed to parse CSV. Please check the format.');
+        notify('Failed to parse CSV. Please check the format.', 'error');
     }
 }
 
 function copyExampleCsv() {
     const pre = document.getElementById('example-csv');
     if (!pre) {
-        alert('Example CSV not found');
+        notify('Example CSV not found', 'warn');
         return;
     }
     const text = (pre.textContent || pre.innerText || '').trim();
     if (!text) {
-        alert('Example CSV is empty');
+        notify('Example CSV is empty', 'warn');
         return;
     }
 
@@ -2174,7 +2460,7 @@ function copyExampleCsv() {
                 document.execCommand('copy');
                 onSuccess();
             } catch (e) {
-                alert('Failed to copy example CSV to clipboard');
+                notify('Failed to copy example CSV to clipboard', 'error');
             }
             textarea.remove();
         });
@@ -2208,7 +2494,7 @@ function copyExampleCsv() {
         document.execCommand('copy');
         onSuccess();
     } catch (e) {
-        alert('Failed to copy example CSV to clipboard');
+        notify('Failed to copy example CSV to clipboard', 'error');
     }
     textarea.remove();
 }
@@ -2436,12 +2722,79 @@ function confirmTimePicker() {
     closeTimePicker();
 }
 
+// Bind CSV import buttons (CSP-friendly) when DOM is ready
+function bindCsvImportButtons() {
+    try {
+        const openBtn = document.getElementById('open-csv-btn');
+        if (openBtn) openBtn.addEventListener('click', openCsvImport);
+
+        const copyExample = document.getElementById('csv-copy-example');
+        if (copyExample) copyExample.addEventListener('click', copyExampleCsv);
+
+        const parseBtn = document.getElementById('csv-parse');
+        if (parseBtn) parseBtn.addEventListener('click', parseCsv);
+
+        const backBtn = document.getElementById('csv-back');
+        if (backBtn) backBtn.addEventListener('click', backToCsvInput);
+
+        const importAllBtn = document.getElementById('csv-import-all');
+        if (importAllBtn) importAllBtn.addEventListener('click', importCsvEntries);
+    } catch (e) { dbg('bindCsvImportButtons error: ' + e.message, 'error'); }
+}
+
+// Ensure bindings are attached after a short delay (DOM may not be ready immediately)
+setTimeout(bindCsvImportButtons, 200);
+
 async function importCsvEntries() {
     if (csvParsedData.length === 0) return;
-    
-    // Add all parsed entries
+    // If we're in per-day mode (per-day API present and dateIndex used), merge into dateIndex
+    if (window.GitHubPerDayAPI) {
+        const groups = {};
+        csvParsedData.forEach(e => {
+            // Normalize date into YYYY-MM-DD. Prefer explicit date, then timestamp, then today.
+            let rawDate = e.date || (e.timestamp ? formatDateLocal(e.timestamp) : getTodayString());
+            try {
+                // If rawDate looks like ISO or parseable, format it to local YYYY-MM-DD
+                const parsed = new Date(rawDate);
+                if (!isNaN(parsed.getTime())) rawDate = formatDateLocal(parsed);
+            } catch (err) { /* keep rawDate as-is */ }
+            e.date = rawDate;
+            e._published = false;
+            if (!groups[rawDate]) groups[rawDate] = [];
+            groups[rawDate].push(e);
+        });
+
+        // Merge into in-memory dateIndex and flattened entries
+        Object.keys(groups).forEach(d => {
+            if (!state.dateIndex[d]) state.dateIndex[d] = [];
+            state.dateIndex[d] = state.dateIndex[d].concat(groups[d]);
+        });
+        // Rebuild flattened entries list
+        state.entries = Object.keys(state.dateIndex).sort().reduce((acc, k) => acc.concat(state.dateIndex[k]), []);
+        state.hasUnsavedChanges = true;
+        render();
+        renderHistory();
+        dbg(`Imported ${csvParsedData.length} entries (merged into per-day index)`, 'info');
+
+        // Auto-save behavior: if user has enabled autoSave in config, push per-day files to GitHub now
+        try {
+            const autoSaveEnabled = getConfig('autoSave');
+            if (autoSaveEnabled) {
+                dbg('Auto-save enabled: pushing imported CSV to GitHub (per-day files)', 'info');
+                await pushToGit();
+            }
+        } catch (e) {
+            dbg(`Auto-save push failed: ${e.message}`, 'error');
+        }
+
+        closeCsvImport();
+        return;
+    }
+
+    // Fallback: add all parsed entries to the flat entries list
     state.entries.push(...csvParsedData);
     state.hasUnsavedChanges = true;
+    autoPushChangedDays();
 
     render();
     renderHistory();

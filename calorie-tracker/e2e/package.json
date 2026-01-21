@@ -1,0 +1,14 @@
+{
+  "name": "calorie-tracker-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "install-deps": "npx playwright install"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.35.0",
+    "node-fetch": "^2.6.7"
+  }
+}

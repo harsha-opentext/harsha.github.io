@@ -51,17 +51,18 @@
                 <button class="icon-btn" onclick="reloadApp()" title="Refresh Data">🔄</button>
                 <div style="display: flex; gap: 8px; padding-left: 8px; border-left: 1px solid var(--border);">
                     <button class="btn-secondary" onclick="fetchFromGit()" style="padding: 10px 16px; font-size: 14px;">⬇️ Fetch Data</button>
-                    <button class="btn-primary" onclick="pushToGit()" style="padding: 10px 16px; font-size: 14px;">📤 Publish Data</button>
+                    <span style="display:inline-flex; align-items:center; padding: 8px 12px; font-size:14px; color:var(--text-secondary);">🔄 Auto-Save Enabled</span>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px; padding-left:8px; border-left: 1px solid var(--border);">
                     <button id="date-btn" class="btn-secondary" style="padding: 8px 12px; font-size: 13px;">Date</button>
                 </div>
                 <div style="display: flex; gap: 8px; padding-left: 8px; border-left: 1px solid var(--border);">
-                    <button class="btn-secondary" onclick="openCsvImport()" style="padding: 10px 16px; font-size: 14px;">📄 Import CSV</button>
+                    <button id="open-csv-btn" class="btn-secondary" style="padding: 10px 16px; font-size: 14px;">📄 Import CSV</button>
                     <button id="select-mode-btn" class="btn-secondary" onclick="toggleSelectMode()" style="padding: 10px 16px; font-size: 14px;">☑️ Select</button>
                 </div>
             </div>
             <h1>Today's Entries</h1>
+            <div id="perday-status" style="font-size:13px; color:var(--text-secondary); margin-top:6px;">Per-day: unknown</div>
         </div>
         
         <div id="bulk-actions">
@@ -204,14 +205,14 @@
         <div class="settings-section">
             <h3>🔄 Data Management</h3>
             <button class="btn-secondary" onclick="fetchFromGit()">⬇️ Fetch from GitHub</button>
-            <button class="btn-secondary" onclick="pushToGit()">⬆️ Push to GitHub</button>
+            <span style="display:inline-flex; align-items:center; padding:8px 12px; color:var(--text-secondary);">🔄 Auto-Save is active — manual push disabled</span>
             <button class="btn-danger" onclick="clearAllData()">🗑️ Clear Local Data</button>
         </div>
 
         <div class="settings-section">
             <h3>📱 App Info</h3>
             <p><strong>Version:</strong> 2.0.0</p>
-            <p><strong>Data File:</strong> <code id="settings-datafile">data.json</code></p>
+            <p><strong>Data Storage:</strong> <code id="settings-datafile">Per-day (tracker/data/)</code></p>
             <p><strong>Schema:</strong> <code id="settings-schema">Loading...</code></p>
         </div>
 
@@ -268,10 +269,10 @@
                     <div style="display: flex; gap: 8px; align-items: flex-start;">
                         <pre id="example-csv" style="background: var(--bg); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-secondary);">2026-01-15,9:00 AM,Eggs (2 whole + 2 whites),220,20.0,2.0,10.0
 2026-01-15,,Korean BBQ noodles (90 g),289,7.4,37.4,12.2</pre>
-                        <button class="btn-secondary" style="height: 40px; margin-top: 8px;" onclick="copyExampleCsv()">📋 Copy</button>
+                        <button id="csv-copy-example" class="btn-secondary" style="height: 40px; margin-top: 8px;">📋 Copy</button>
                     </div>
                     <textarea id="csv-input" placeholder="Paste CSV data here..." style="width: 100%; height: 200px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 13px; margin: 12px 0;"></textarea>
-                    <button class="btn-primary" onclick="parseCsv()" style="width: 100%;">🔍 Parse & Preview</button>
+                    <button id="csv-parse" class="btn-primary" style="width: 100%;">🔍 Parse & Preview</button>
                 </div>
                 
                 <div id="csv-preview-section" style="display: none;">
@@ -281,8 +282,8 @@
                             <p style="margin: 0; color: var(--text-secondary); font-size: 14px;"><span id="csv-count">0</span> entries ready to import</p>
                         </div>
                         <div style="display: flex; gap: 8px;">
-                            <button class="btn-secondary" onclick="backToCsvInput()" style="padding: 10px 20px;">← Back</button>
-                            <button class="btn-primary" onclick="importCsvEntries()" style="padding: 10px 20px;">✅ Import All</button>
+                            <button id="csv-back" class="btn-secondary" style="padding: 10px 20px;">← Back</button>
+                            <button id="csv-import-all" class="btn-primary" style="padding: 10px 20px;">✅ Import All</button>
                         </div>
                     </div>
                     <div id="csv-preview-list" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 12px;"></div>
@@ -338,6 +339,8 @@
             </div>
         </div>
     </div>
+    <script src="tools/github-db-ops.js"></script>
+    <script src="tools/github-perday-api.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

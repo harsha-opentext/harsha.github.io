@@ -1,0 +1,11 @@
+{
+  "name": "harsha-gh-pages-tests",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "jsdom": "^22.1.0"
+  },
+  "scripts": {
+    "test-ui": "node calorie-tracker/tests/add-delete.test.js"
+  }
+}

@@ -1,0 +1,94 @@
+[
+  {
+    "id": 1,
+    "task": "Add per-day state & helpers",
+    "completed": true,
+    "description": "Add `state.dateIndex` and helper functions to manage per-day entries in-memory. Expose small wrapper functions for reading/writing a single date's entries. Acceptance: `state.dateIndex` is populated after per-day load and helper functions are used by fetch flows."
+  },
+  {
+    "id": 2,
+    "task": "Detect storage mode & load per-day",
+    "completed": true,
+    "description": "Detect whether `tracker/data/` contains per-day files and, if so, load them into `state.dateIndex`. If per-day files are present, do not fall back to `data.json`. Acceptance: app logs per-day detection and `state.dateIndex` contains expected keys for existing date files."
+  },
+  {
+    "id": 3,
+    "task": "Render today's view from per-day index",
+    "completed": true,
+    "description": "Update the tracker UI to prefer `state.dateIndex[today]` when rendering the tracker page. Acceptance: today's entries render correctly from per-day data and aggregate displays (calorie totals) match the entries."
+  },
+  {
+    "id": 4,
+    "task": "Add-entry: write only today's file",
+    "completed": false,
+    "description": "Modify the app's `addEntry()` flow so that new entries are appended to today's per-day file (tracker/data/YYYY-MM-DD.json) instead of rewriting the monolithic data.json. Implementation details: 1) Compose today's filename using the app date util, 2) Read existing entries for today (if any) or create a new array, 3) Push the new entry into that array and optimistically update `state.dateIndex[today]` and the flattened `state.entries`, 4) Persist using `GitHubPerDayAPI.writeDateFile()` (or `window.GitHubPerDayAPI.writeDateFile` in-browser), 5) On success update `state.perDaySha` with returned SHA; on failure roll back optimistic UI and surface an error. Acceptance criteria: adding an entry in the browser issues a single PUT to tracker/data/<today>.json, the returned SHA is stored in `state.perDaySha`, and the UI shows the new entry immediately. Add a smoke test that posts a new entry and verifies the repo file content and returned SHA."
+  },
+  {
+    "id": 5,
+    "task": "Edit/Delete entry per-day updates",
+    "completed": false,
+    "description": "Implement editing and deletion of entries inside per-day files. Requirements: 1) Provide handlers for editing an entry by index and for deleting an entry; 2) For today's date, operate directly on `state.dateIndex[today]` and flatten `state.entries` after the change; 3) For past dates, fetch the appropriate date file, apply the change, and write it back; 4) Use `GitHubPerDayAPI.writeDateFile()` to persist changes and update the per-day SHA; 5) Before writing, re-fetch the file's current SHA to reduce write conflicts; if a SHA mismatch occurs, retry with a merge prompt or abort with a user-facing conflict message; 6) Add unit/smoke tests covering edit and delete flows (browser and node scripts). Acceptance criteria: editing or deleting an entry updates the UI immediately, persists the change to tracker/data/<date>.json, and updates `state.perDaySha`. Log all write failures and show concise alerts for users."
+  },
+  {
+    "id": 6,
+    "task": "Replace publish with per-day writer",
+    "completed": false,
+    "description": "Replace the monolithic 'publish' workflow so it writes only affected per-day files (or a small set) instead of the entire dataset. Ensure commit messages and SHAs are tracked per-file. Acceptance: publish action issues PUT(s) only for changed date files and returns per-file commit metadata."
+  },
+  {
+    "id": 7,
+    "task": "History: lazy-load & pagination",
+    "completed": false,
+    "description": "Implement lazy-loading and pagination for the history view so the app does not fetch all per-day files at once. Use listing to discover available dates and fetch ranges on demand. Acceptance: history scroll triggers fetch for additional date files and memory stays bounded."
+  },
+  {
+    "id": 8,
+    "task": "Analytics: aggregate per-day range",
+    "completed": false,
+    "description": "Update analytics to compute aggregates by loading only the per-day files in the selected range and combining entries. Cache results for repeated queries. Acceptance: analytics charts update correctly for 7/14/30/90 day ranges and match manual aggregation."
+  },
+  {
+    "id": 9,
+    "task": "Concurrency & SHA retry handling",
+    "completed": false,
+    "description": "Add conflict resolution and retry logic for concurrent writes: re-fetch SHAs before writes, attempt a configurable number of retries with backoff, and present a merge/overwrite prompt on persistent conflict. Acceptance: write conflicts are detected and handled without silent data loss."
+  },
+  { "id": 11, "task": "Extract GitHub per-day helpers into module", "completed": true },
+  { "id": 12, "task": "Extract all GitHub DB operations into module", "completed": true },
+  {
+    "id": 10,
+    "task": "Toggle + cleanup + docs",
+    "completed": false,
+    "description": "Add a feature toggle to switch between 'per-day' and 'monolith' modes for testing, remove dead code paths, and update documentation and README entries explaining the per-day format and migration. Acceptance: toggle works and docs explain migration steps and fallback behavior."
+  },
+  {
+    "id": 13,
+    "task": "Delete monolithic data.json and validate per-day-only operation",
+    "completed": false,
+    "description": "After read/write per-day flows are fully verified, remove `data.json` from the repo and confirm the app works in per-day-only mode. Include a rollback plan and backup copy. Acceptance: `data.json` removed and app functions normally; migration checksum tests pass."
+  },
+  {
+    "id": 14,
+    "task": "Store daily calorie budget in database; retrieve and use it for today's calories progress bar if already set",
+    "completed": false,
+    "description": "Persist the user's daily calorie budget in a simple config file or a per-day metadata file and use it to render today's progress bar. Acceptance: user can set a budget and the tracker uses it to calculate percent and remaining calories for today."
+  },
+  {
+    "id": 15,
+    "task": "List files in data folder and load only today's file when rendering today's page (avoid loading all files)",
+    "completed": false,
+    "description": "Optimize today's view by listing `tracker/data/` and fetching only today's file instead of loading all files into memory. Provide fallback to load nearby dates if needed. Acceptance: initial load uses directory listing and fetches just today's file, reducing latency and network usage."
+  },
+  {
+    "id": 16,
+    "task": "Add Edit button to today's entries (reuse History edit)",
+    "completed": false,
+    "description": "Add a single Edit button beside the existing Delete button for each entry on the Today's entries page. Clicking Edit should open the identical edit pane used on the History page and allow modifying macros, date, and time. Strongly prefer reuse: if the History edit UI/handlers are not already shared, extract the common edit logic/UI into a shared helper/module (e.g. openEditPane(entry, opts) and applyEntryEdit(entry, changes)) and wire it from both History and Today's pages. Persist edits using the per-day write flow (re-fetch SHA when needed), optimistically update state.dateIndex[today] and flattened state.entries on success, and roll back on failure. Acceptance criteria: each today's entry shows an Edit button; the edit pane is identical to History's; edits update the UI immediately and persist to the correct per-day file (repo content and returned SHA validated by a smoke test); shared edit code is reused by both pages."
+  },
+  {
+    "id": 17,
+    "task": "Extract CSV operations into csv_ops.js and update references",
+    "completed": false,
+    "description": "Move all CSV-related functions and helpers out of app.js into a new module file `csv_ops.js`. Define and export a concise public API (suggested names: `exportEntriesToCSV(entries, opts)`, `importCSVToEntries(fileOrText, opts)`, `parseCSV(text, opts)`, `formatCSVRow(entry, schema)`, `generateCSVHeader(schema)`, `getCSVDownloadFilename(dateRange)`). Do not preserve legacy global calls — update all callers across the codebase to use the new module API. Tasks: 1) Locate every CSV helper, parser, formatter, and UI hook in app.js and relocate them into csv_ops.js; 2) Ensure csv_ops.js reads the runtime schema (use the schema loader or accept schema as an argument) — do not hardcode field names; 3) Implement robust quoting/escaping, correct date/time formatting, and optional streaming for large exports; 4) Preserve and reuse existing logging (`dbg(...)`) and error patterns; 5) Update all imports/usages across the app (tracker UI, history export buttons, settings, analytics export, tests, and any CI scripts) to call the new module API; 6) Add unit tests for parsing, formatting, header generation, and a smoke test for export→import round-trip that verifies content and schema alignment; 7) Remove defensive compatibility shims — callers will be updated to the new API; 8) Update index.html/module loader to include csv_ops.js and update README/docs to describe the new module and public API. Acceptance criteria: csv_ops.js contains all CSV logic; app.js contains no CSV parsing/formatting code; all references updated to use the module; CSV export/import behavior is unchanged; unit and smoke tests for CSV flows pass; developer docs updated."
+  }
+]
