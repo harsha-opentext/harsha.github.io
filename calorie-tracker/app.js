@@ -4,6 +4,7 @@ let state = {
     logs: [], 
     retentionMinutes: 5, 
     schema: null,
+    fileIndex: {},
     logLevel: 'info', // debug, info, warn, error
     dateRangeStart: null,
     dateRangeEnd: null,
@@ -17,6 +18,9 @@ let state = {
     autoSyncing: false
     
 };
+
+// Track which history date-sets we've attempted to prefetch to avoid fetch loops
+state.historyPrefetchAttempts = new Set();
 
 const LOG_LEVELS = {
     debug: 0,
@@ -83,40 +87,11 @@ function getTodayString() {
 }
 
 function isTodayEntry(entry) {
-    const today = getTodayString();
+    // Use canonical date logic to determine if this entry is for today.
     if (!entry) return false;
-
-    // If an explicit `date` field is present, rely on that only.
-    // This prevents UTC timestamps (e.g., 2026-01-15T23:30Z) from being
-    // converted to the local next-day and incorrectly showing an entry
-    // with `date: 2026-01-15` on the 2026-01-16 tracker view.
-    if (entry.date) {
-        const dateStr = (entry.date || '').trim();
-        const isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if (isoMatch) {
-            const y = parseInt(isoMatch[1], 10);
-            const m = parseInt(isoMatch[2], 10) - 1;
-            const d = parseInt(isoMatch[3], 10);
-            const localDate = new Date(y, m, d);
-            return formatDateLocal(localDate) === today;
-        } else {
-            // Fallback: try generic Date parse
-            try {
-                const parsed = new Date(entry.date);
-                return !isNaN(parsed.getTime()) && formatDateLocal(parsed) === today;
-            } catch (e) { /* ignore */ }
-        }
-    }
-
-    // If no explicit `date` field is present, fall back to `timestamp`.
-    if (entry.timestamp) {
-        try {
-            const parsedTs = new Date(entry.timestamp);
-            return !isNaN(parsedTs.getTime()) && formatDateLocal(parsedTs) === today;
-        } catch (e) { /* ignore */ }
-    }
-
-    return false;
+    const today = getTodayString();
+    const ed = getEntryDate(entry);
+    return ed === today;
 }
 
 function render() {
@@ -139,6 +114,19 @@ function render() {
     let todayMatches = 0;
     state.entries.forEach((entry) => { if (isTodayEntry(entry)) todayMatches++; });
     dbg(`Rendering tracker: ${todayMatches} / ${totalEntries} entries match today's date (${getTodayString()})`, 'debug');
+
+    // If nothing shows for today but we have entries, dump per-entry date info to help debug
+    if (todayMatches === 0 && totalEntries > 0) {
+        dbg('No entries classified as today; dumping per-entry date info', 'warn');
+        state.entries.forEach((entry, idx) => {
+            try {
+                const ed = getEntryDate(entry);
+                dbg(`Entry[${idx}] getEntryDate=${ed} raw.date=${entry.date || 'n/a'} timestamp=${entry.timestamp || 'n/a'}`, 'debug', entry);
+            } catch (e) {
+                dbg(`Error inspecting entry[${idx}]: ${e.message}`, 'error');
+            }
+        });
+    }
 
     state.entries.forEach((entry, index) => {
         if (!isTodayEntry(entry)) return; // skip non-today entries but keep global index
@@ -487,7 +475,22 @@ function showPage(p) {
     
     // Load page-specific content
     if (p === 'history') {
-        renderHistory();
+        // Default history view: show only today's entries to avoid an expensive
+        // full-folder fetch on every navigation. If the user requests a range
+        // or older data, a fetch will be triggered from the range handler.
+        state.dateRangeStart = getTodayString();
+        state.dateRangeEnd = getTodayString();
+        try {
+            fetchFromGit(true).then(() => {
+                renderHistory();
+            }).catch((err) => {
+                dbg(`Fetch today's file for history failed: ${err?.message || err}`, 'warn');
+                renderHistory();
+            });
+        } catch (e) {
+            dbg(`Failed initiating today's fetch for history: ${e.message}`, 'error');
+            renderHistory();
+        }
     } else if (p === 'analytics') {
         // Set today's date by default
         const dateInput = document.getElementById('analytics-date');
@@ -499,7 +502,7 @@ function showPage(p) {
         // Update settings display
         const dataFileEl = document.getElementById('settings-datafile');
         const schemaEl = document.getElementById('settings-schema');
-        if (dataFileEl) dataFileEl.innerText = getConfig('dataFile');
+        if (dataFileEl) dataFileEl.innerText = `${getConfig('dataFolder')}/<YYYY-MM-DD>.json`;
         if (schemaEl) schemaEl.innerText = state.schema ? state.schema.displayName : 'Loading...';
     }
 }
@@ -789,45 +792,23 @@ function clearFormFields() {
 function saveSettings() {
     const t = document.getElementById('cfg-token').value.trim();
     const r = document.getElementById('cfg-repo').value.trim();
-    const autoSaveCheckbox = document.getElementById('cfg-autosave');
-    const autoSave = autoSaveCheckbox ? autoSaveCheckbox.checked : false;
     const dailyBudgetInput = document.getElementById('cfg-daily-budget');
     const dailyBudget = dailyBudgetInput ? parseInt(dailyBudgetInput.value, 10) : null;
     
     localStorage.setItem('gt_token', t);
     localStorage.setItem('gt_repo', r);
-    setConfig('autoSave', autoSave);
     if (!isNaN(dailyBudget) && dailyBudget > 0) setConfig('dailyBudget', dailyBudget);
     
-    updateAutoSaveUI();
     dbg("Settings saved");
     toggleSettings();
     fetchFromGit();
 }
 
 function updateAutoSaveUI() {
-    const autoSave = getConfig('autoSave');
+    // Auto-save is now always enabled and publish buttons have been removed.
+    // Remove any remaining legacy publish buttons from DOM to avoid accidental single-file pushes.
     const pushBtns = document.querySelectorAll('[onclick="pushToGit()"]');
-    
-    pushBtns.forEach(btn => {
-        if (autoSave) {
-            btn.classList.add('auto-syncing');
-            if (!btn.querySelector('.sync-icon')) {
-                const icon = document.createElement('span');
-                icon.className = 'sync-icon';
-                icon.textContent = '🔄';
-                btn.insertBefore(icon, btn.firstChild);
-                btn.insertBefore(document.createTextNode(' '), icon.nextSibling);
-            }
-        } else {
-            btn.classList.remove('auto-syncing');
-            const icon = btn.querySelector('.sync-icon');
-            if (icon) {
-                icon.nextSibling?.remove();
-                icon.remove();
-            }
-        }
-    });
+    pushBtns.forEach(btn => btn.remove());
 }
 
 let autoSaveTimeout = null;
@@ -835,145 +816,458 @@ function autoSave() {
     clearTimeout(autoSaveTimeout);
     autoSaveTimeout = setTimeout(() => {
         if (!state.autoSyncing) {
-            pushToGit(true);
+            // Always use per-date replace sync so edits/deletes persist.
+            try {
+                // Avoid replacing remote per-date files with an empty array if we have no local entries.
+                if (!Array.isArray(state.entries) || state.entries.length === 0) {
+                    dbg('Auto-save skipped: no entries to persist', 'warn');
+                    return;
+                }
+                pushEntriesByDate(state.entries, { mode: 'replace' });
+            } catch (e) {
+                dbg(`Auto-save failed: ${e.message}`, 'error');
+            }
         }
     }, 3000);
 }
 
-async function fetchFromGit() {
+async function fetchFromGit(onlyToday = false) {
     const token = localStorage.getItem('gt_token');
     const repo = localStorage.getItem('gt_repo');
 
     if (!token || !repo) {
         dbg("Missing credentials - skipping GitHub fetch (no cache)", "warn");
         alert('Missing GitHub credentials. Open Settings and configure your token and repo first.');
-        // Open settings page for easy configuration
         try { showPage('settings'); } catch (e) { /* ignore */ }
         return;
     }
 
-    const dataFile = getConfig('dataFile');
-    const url = `https://api.github.com/repos/${repo}/contents/${dataFile}`;
-    
+    const dataFolder = getConfig('dataFolder');
     dbg(`Fetching data from GitHub`, 'info');
     dbg(`Repository: ${repo}`, 'debug');
-    dbg(`Data file: ${dataFile}`, 'debug');
-    dbg(`URL: ${url}`, 'debug');
+    dbg(`Data folder: ${dataFolder}`, 'debug');
 
-    try {
-        // Optional: show a small loading marker on the first fetch button
-        const activeBtn = document.querySelector('[onclick="fetchFromGit()"]');
-        if (activeBtn) activeBtn.classList.add('loading');
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: { 
-                'Authorization': `Bearer ${token}`,
-                'Accept': 'application/vnd.github.v3+json'
-            }
-        });
+    const activeBtn = document.querySelector('[onclick^="fetchFromGit"]');
+    if (activeBtn) activeBtn.classList.add('loading');
 
-        dbg(`Response status: ${response.status}`, 'debug');
-
-        if (!response.ok) {
-            if (response.status === 404) {
-                dbg("Data file not found - will create on first push", "warn");
+    // If a data folder is configured, prefer listing and fetching per-date files.
+    if (dataFolder) {
+        // If onlyToday is requested, fetch only today's file to speed up tracker view.
+        if (onlyToday) {
+            const today = getTodayString();
+            const filePath = `${dataFolder}/${today}.json`;
+            const fileUrl = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+            dbg(`Fetching only today's file: ${fileUrl}`, 'debug');
+            try {
+                const r = await fetch(fileUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+                dbg(`Today's file fetch status: ${r.status}`, 'debug');
+                if (r.ok) {
+                    const j = await r.json();
+                    dbg(`Today's file response keys: ${Object.keys(j).join(', ')}`, 'debug');
+                    const b64 = j.content || '';
+                    dbg(`Today's file base64 length: ${b64.length}`, 'debug');
+                    let decoded = '';
+                    try { decoded = atob(b64); dbg(`Today's file decoded preview: ${decoded.slice(0,200)}`, 'debug'); } catch (e) { dbg(`Failed to base64-decode today's file content: ${e.message}`, 'warn'); }
+                    let arr = [];
+                    try { arr = JSON.parse(decoded || ''); if (!Array.isArray(arr)) arr = []; } catch (e) { dbg(`Invalid JSON in ${filePath}: ${e.message}`, 'warn', decoded ? decoded.slice(0,200) : null); arr = []; }
+                    state.fileIndex[today] = j.sha;
+                    state.entries = arr;
+                    render();
+                    renderHistory();
+                    dbg(`Loaded ${arr.length} entries from ${filePath}`, 'info');
+                    if (activeBtn) activeBtn.classList.remove('loading');
+                    return;
+                } else if (r.status === 404) {
+                    dbg(`Today's data file not found: ${filePath}`, 'info');
+                    state.entries = [];
+                    render();
+                    renderHistory();
+                    if (activeBtn) activeBtn.classList.remove('loading');
+                    return;
+                } else {
+                    const err = await r.json().catch(() => ({}));
+                    dbg(`Error fetching today's file: ${err.message || r.statusText}`, 'error', err);
+                    state.entries = [];
+                    render();
+                    renderHistory();
+                    if (activeBtn) activeBtn.classList.remove('loading');
+                    return;
+                }
+            } catch (e) {
+                dbg(`Error fetching today's file: ${e.message}`, 'error');
                 state.entries = [];
                 render();
+                renderHistory();
+                if (activeBtn) activeBtn.classList.remove('loading');
                 return;
             }
-            const errBody = await response.json();
-            dbg(`GitHub API error: ${errBody.message || response.statusText}`, "error", errBody);
-            return;
         }
 
-        const data = await response.json();
-        state.sha = data.sha;
-        dbg(`Retrieved file SHA: ${state.sha.substring(0, 8)}...`, 'debug');
-        
-        const content = atob(data.content);
-        dbg(`Content decoded, size: ${content.length} bytes`, 'debug');
-        
-        state.entries = JSON.parse(content);
-        render();
-        // Note: not caching locally in this build
-        dbg(`Successfully loaded ${state.entries.length} entries`, 'info');
+        // Full listing: list folder and fetch recent per-date files
+        const listUrl = `https://api.github.com/repos/${repo}/contents/${dataFolder}`;
+        dbg(`Listing folder: ${listUrl}`, 'debug');
+        try {
+            const listRes = await fetch(listUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+            dbg(`Folder list status: ${listRes.status}`, 'debug');
+                if (listRes.ok) {
+                const items = await listRes.json();
+                dbg(`Folder listing returned ${items.length} items`, 'debug');
+                dbg(`Folder items preview: ${items.slice(0,20).map(it=>it.name).join(', ')}`, 'debug');
+                // Filter for YYYY-MM-DD.json files
+                const dateItems = (items || []).filter(it => it.type === 'file' && /^\d{4}-\d{2}-\d{2}\.json$/.test(it.name));
+                dateItems.sort((a, b) => b.name.localeCompare(a.name)); // newest first by name
 
-    } catch (err) {
-        dbg(`Fetch error: ${err.message}`, "error");
-        dbg(`Stack trace: ${err.stack}`, 'debug');
+                const limit = parseInt(getConfig('fetchDays') || 90, 10) || 90;
+                const toFetch = dateItems.slice(0, limit);
+
+                dbg(`Found ${dateItems.length} date files, fetching up to ${toFetch.length}`, 'info');
+
+                const CHUNK = 5;
+                const merged = [];
+                for (let i = 0; i < toFetch.length; i += CHUNK) {
+                    const chunk = toFetch.slice(i, i + CHUNK);
+                    const promises = chunk.map(async (it) => {
+                        try {
+                            const r = await fetch(it.url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+                            dbg(`Fetching file ${it.name} status: ${r.status}`, 'debug');
+                            if (!r.ok) {
+                                dbg(`Failed to fetch ${it.name}: ${r.status}`, 'warn');
+                                return [];
+                            }
+                            const j = await r.json();
+                            const b64 = j.content || '';
+                            dbg(`File ${it.name} base64 length: ${b64.length}`, 'debug');
+                            let decoded = '';
+                            try { decoded = atob(b64); dbg(`Decoded preview ${it.name}: ${decoded.slice(0,200)}`, 'debug'); } catch (e) { dbg(`Failed to decode ${it.name}: ${e.message}`, 'warn'); }
+                            let arr = [];
+                            try { arr = JSON.parse(decoded || ''); if (!Array.isArray(arr)) arr = []; } catch (e) { dbg(`Invalid JSON in ${it.name}: ${e.message}`, 'warn', decoded ? decoded.slice(0,200) : null); arr = []; }
+                            const dateStr = it.name.replace('.json', '');
+                            state.fileIndex[dateStr] = j.sha;
+                            return arr;
+                        } catch (e) {
+                            dbg(`Error fetching ${it.name}: ${e.message}`, 'error');
+                            return [];
+                        }
+                    });
+                    const results = await Promise.all(promises);
+                    results.forEach(r => merged.push(...r));
+                }
+
+                state.entries = merged;
+                render();
+                renderHistory();
+                dbg(`Successfully loaded ${state.entries.length} entries from ${toFetch.length} files`, 'info');
+                if (activeBtn) activeBtn.classList.remove('loading');
+                return;
+            } else if (listRes.status === 404) {
+                dbg('Data folder not found - no data loaded', 'warn');
+                state.entries = [];
+                render();
+                renderHistory();
+                if (activeBtn) activeBtn.classList.remove('loading');
+                return;
+            } else {
+                const errBody = await listRes.json().catch(() => ({}));
+                dbg(`Folder list error: ${errBody.message || listRes.statusText}`, 'error', errBody);
+                state.entries = [];
+                render();
+                renderHistory();
+                if (activeBtn) activeBtn.classList.remove('loading');
+                return;
+            }
+        } catch (e) {
+            dbg(`Folder list fetch error: ${e.message}`, 'error');
+            state.entries = [];
+            render();
+            renderHistory();
+            if (activeBtn) activeBtn.classList.remove('loading');
+            return;
+        }
     }
-    finally {
-        const activeBtn = document.querySelector('[onclick="fetchFromGit()"]');
-        if (activeBtn) activeBtn.classList.remove('loading');
-    }
+    // No legacy single-file behavior. If dataFolder is not configured we don't load or create data.json.
+    dbg('No data folder configured; no data loaded', 'warn');
+    state.entries = [];
+    render();
+    renderHistory();
+    if (activeBtn) activeBtn.classList.remove('loading');
 }
 
 // Load a local copy of the data file (useful when not using GitHub)
 
 async function pushToGit() {
+    // Deprecated: single-file publishing removed in favor of per-day `data/` files.
+    alert('Single-file publish (data.json) has been removed. The app now uses per-day files under the data/ folder and auto-syncs changes automatically.');
+    dbg('pushToGit() called but single-file publishing is deprecated', 'warn');
+}
+
+// --- Phase 2 helpers: per-date pushes ---
+async function pushEntryForDate(dateStr, entry) {
     const token = localStorage.getItem('gt_token');
     const repo = localStorage.getItem('gt_repo');
-    
     if (!token || !repo) {
-        dbg("Cannot push: Missing credentials", "error");
-        return;
+        dbg('Cannot push entry: Missing credentials', 'error');
+        return false;
     }
 
-    const dataFile = getConfig('dataFile');
-    const jsonContent = JSON.stringify(state.entries, null, 2);
-    const url = `https://api.github.com/repos/${repo}/contents/${dataFile}`;
+    const dataFolder = getConfig('dataFolder') || 'data';
+    const filePath = `${dataFolder}/${dateStr}.json`;
+    const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
 
-    dbg(`Pushing ${state.entries.length} entries to GitHub`, 'info');
-    dbg(`Data size: ${jsonContent.length} bytes`, 'debug');
-    
-    // Add loading state to push button
-    const pushBtn = event?.target;
-    if (pushBtn) pushBtn.classList.add('loading');
+    dbg(`Pushing 1 entry to ${filePath}`, 'info');
 
     try {
-        const body = {
-            message: "Sync: " + new Date().toISOString(),
-            content: btoa(unescape(encodeURIComponent(jsonContent)))
-        };
-        
-        // Include SHA only if we have it (for updates)
-        if (state.sha) {
-            body.sha = state.sha;
-            dbg(`Updating existing file (SHA: ${state.sha.substring(0, 8)}...)`, 'debug');
-        } else {
-            dbg('Creating new file', 'debug');
+        // Try fetch existing file to get sha and existing content
+        let existing = [];
+        let fileSha = null;
+        try {
+            const getRes = await fetch(url, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' }
+            });
+            if (getRes.ok) {
+                const j = await getRes.json();
+                fileSha = j.sha;
+                try { existing = JSON.parse(atob(j.content || '')); } catch (e) { existing = []; }
+                if (!Array.isArray(existing)) existing = [];
+            }
+        } catch (e) {
+            dbg(`No existing ${filePath} found, creating new file`, 'debug');
         }
 
-        const res = await fetch(url, {
+        existing.push(entry);
+        const jsonContent = JSON.stringify(existing, null, 2);
+        dbg(`pushEntryForDate: prepared JSON content length=${jsonContent.length}`, 'debug');
+        dbg(`pushEntryForDate: preview => ${jsonContent.slice(0,200)}`, 'debug');
+        const body = {
+            message: `Add entry ${dateStr}: ${new Date().toISOString()}`,
+            content: btoa(unescape(encodeURIComponent(jsonContent)))
+        };
+        if (fileSha) body.sha = fileSha;
+
+        const putRes = await fetch(url, {
             method: 'PUT',
-            headers: { 
-                'Authorization': `Bearer ${token}`, 
-                'Content-Type': 'application/json' 
-            },
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
 
-        if (res.ok) {
-            const json = await res.json();
-            state.sha = json.content.sha;
-            state.hasUnsavedChanges = false;
-            dbg("Successfully saved to GitHub", 'info');
-            dbg(`New SHA: ${state.sha.substring(0, 8)}...`, 'debug');
-            // No local caching performed in this build
-            
-            // Format nice success message
-            const [owner, repoName] = repo.split('/');
-            alert(`✅ Successfully published!\n\n📁 Repository: ${repoName}\n👤 Owner: ${owner}\n📄 File: ${dataFile}\n\n${state.entries.length} entries saved`);
+        dbg(`pushEntryForDate PUT status: ${putRes.status}`, 'debug');
+        const putBody = await putRes.text().catch(() => '');
+        dbg(`pushEntryForDate PUT response preview: ${putBody.slice(0,200)}`, 'debug');
+        if (putRes.ok) {
+            const resj = JSON.parse(putBody || '{}');
+            state.fileIndex[dateStr] = resj.content?.sha;
+            dbg(`Pushed entry to ${filePath} (SHA: ${resj.content?.sha?.substring?.(0,8) || 'unknown'})`, 'info');
+            return true;
         } else {
-            const err = await res.json();
-            dbg(`Push failed: ${err.message || 'Unknown error'}`, "error", err);
-            alert("❌ Failed to publish. Check logs for details.");
+            let err = {};
+            try { err = JSON.parse(putBody); } catch (e) { err = { message: putBody }; }
+            dbg(`Failed to push entry to ${filePath}: ${err.message || putRes.statusText}`, 'error', err);
+            return false;
         }
     } catch (err) {
-        dbg(`Push error: ${err.message}`, "error");
-        alert("❌ Failed to publish. Check logs for details.");
-    } finally {
-        if (pushBtn) pushBtn.classList.remove('loading');
+        dbg(`pushEntryForDate error: ${err.message}`, 'error');
+        return false;
+    }
+}
+
+async function pushEntriesByDate(entries, options = { mode: 'append' }) {
+    if (!Array.isArray(entries) || entries.length === 0) return;
+    // Group entries by canonical date. Preserve undated entries by inferring from timestamp
+    // or defaulting to today's date to avoid data loss for tracker view.
+    const groups = {};
+    entries.forEach(e => {
+        let d = getEntryDate(e);
+        if (!d) {
+            if (e && e.timestamp) {
+                try {
+                    d = formatDateLocal(new Date(e.timestamp));
+                    dbg(`pushEntriesByDate: inferred date from timestamp => ${d}`, 'debug', e);
+                } catch (err) { /* ignore */ }
+            }
+        }
+        if (!d) {
+            d = getTodayString();
+            dbg('pushEntriesByDate: defaulting undated entry to today to preserve tracker entries', 'warn', e);
+        }
+        if (!groups[d]) groups[d] = [];
+        groups[d].push(e);
+    });
+
+    for (const dateStr of Object.keys(groups)) {
+        const token = localStorage.getItem('gt_token');
+        const repo = localStorage.getItem('gt_repo');
+        if (!token || !repo) {
+            dbg('Cannot push entries: Missing credentials', 'error');
+            return;
+        }
+
+        const dataFolder = getConfig('dataFolder') || 'data';
+        const filePath = `${dataFolder}/${dateStr}.json`;
+        const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+
+        dbg(`Pushing ${groups[dateStr].length} entries to ${filePath}`, 'info');
+
+        try {
+            let existing = [];
+            let fileSha = null;
+            try {
+                const getRes = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+                if (getRes.ok) {
+                    const j = await getRes.json();
+                    fileSha = j.sha;
+                    try { existing = JSON.parse(atob(j.content || '')); } catch (e) { existing = []; }
+                    if (!Array.isArray(existing)) existing = [];
+                }
+            } catch (e) { dbg(`No existing ${filePath} found, creating new file`, 'debug'); }
+
+            // Determine write mode: 'append' merges new entries into existing content; 'replace' writes only the provided group
+            let finalArray;
+            if (options.mode === 'replace') {
+                finalArray = groups[dateStr];
+            } else {
+                // append mode (default) — avoid duplicates by simple stringify check
+                const existingKeys = new Set(existing.map(x => JSON.stringify(x)));
+                finalArray = existing.slice();
+                groups[dateStr].forEach(item => {
+                    const key = JSON.stringify(item);
+                    if (!existingKeys.has(key)) {
+                        finalArray.push(item);
+                        existingKeys.add(key);
+                    }
+                });
+            }
+
+            const jsonContent = JSON.stringify(finalArray, null, 2);
+            const body = { message: `Import: ${dateStr} (${groups[dateStr].length} entries)`, content: btoa(unescape(encodeURIComponent(jsonContent))) };
+            if (fileSha) body.sha = fileSha;
+
+            const putRes = await fetch(url, { method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            dbg(`pushEntriesByDate PUT status for ${filePath}: ${putRes.status}`, 'debug');
+            const putText = await putRes.text().catch(() => '');
+            dbg(`pushEntriesByDate PUT response preview: ${putText.slice(0,200)}`, 'debug');
+            if (putRes.ok) {
+                const resj = JSON.parse(putText || '{}');
+                state.fileIndex[dateStr] = resj.content?.sha;
+                dbg(`Imported ${groups[dateStr].length} into ${filePath} (SHA: ${resj.content?.sha?.substring?.(0,8) || 'unknown'})`, 'info');
+            } else {
+                let err = {};
+                try { err = JSON.parse(putText); } catch (e) { err = { message: putText }; }
+                dbg(`Failed to import to ${filePath}: ${err.message || putRes.statusText}`, 'error', err);
+            }
+        } catch (err) {
+            dbg(`pushEntriesByDate error (${dateStr}): ${err.message}`, 'error');
+        }
+    }
+}
+
+// Write a single date file (allows writing empty arrays to clear a date)
+async function pushDateFile(dateStr, finalArray) {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) {
+        dbg('Cannot push date file: Missing credentials', 'error');
+        return false;
+    }
+
+    const dataFolder = getConfig('dataFolder') || 'data';
+    const filePath = `${dataFolder}/${dateStr}.json`;
+    const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+    // If caller is trying to write an empty array, prefer deleting the file instead
+    // to avoid accidental clearing of user data. Use explicit delete if required.
+    if (!Array.isArray(finalArray) || finalArray.length === 0) {
+        dbg(`pushDateFile: finalArray empty for ${filePath}; deleting file instead of writing empty array`, 'warn');
+        return await deleteDateFile(dateStr);
+    }
+
+    dbg(`Replacing ${filePath} with ${finalArray.length} entries`, 'info');
+
+    try {
+        // Try to fetch existing file to get SHA
+        let fileSha = null;
+        try {
+            const getRes = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+            if (getRes.ok) {
+                const j = await getRes.json();
+                fileSha = j.sha;
+            }
+        } catch (e) { /* ignore */ }
+
+        const jsonContent = JSON.stringify(finalArray || [], null, 2);
+        const body = { message: `Sync date ${dateStr}: ${new Date().toISOString()}`, content: btoa(unescape(encodeURIComponent(jsonContent))) };
+        if (fileSha) body.sha = fileSha;
+
+        const putRes = await fetch(url, { method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        dbg(`pushDateFile PUT status for ${filePath}: ${putRes.status}`, 'debug');
+        const putText = await putRes.text().catch(() => '');
+        dbg(`pushDateFile PUT response preview: ${putText.slice(0,200)}`, 'debug');
+        if (putRes.ok) {
+            const resj = JSON.parse(putText || '{}');
+            state.fileIndex[dateStr] = resj.content?.sha;
+            dbg(`Wrote ${filePath} (SHA: ${resj.content?.sha?.substring?.(0,8) || 'unknown'})`, 'info');
+            return true;
+        } else {
+            let err = {};
+            try { err = JSON.parse(putText); } catch (e) { err = { message: putText }; }
+            dbg(`Failed to write ${filePath}: ${err.message || putRes.statusText}`, 'error', err);
+            return false;
+        }
+    } catch (err) {
+        dbg(`pushDateFile error (${dateStr}): ${err.message}`, 'error');
+        return false;
+    }
+}
+
+// Delete a per-date file from the repo (used when a date becomes empty)
+async function deleteDateFile(dateStr) {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) {
+        dbg('Cannot delete date file: Missing credentials', 'error');
+        return false;
+    }
+
+    const dataFolder = getConfig('dataFolder') || 'data';
+    const filePath = `${dataFolder}/${dateStr}.json`;
+    const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+    dbg(`Deleting ${filePath} from repo`, 'info');
+
+    try {
+        // Fetch existing to get sha
+        let fileSha = null;
+        try {
+            const getRes = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+            if (getRes.ok) {
+                const j = await getRes.json();
+                fileSha = j.sha;
+            } else if (getRes.status === 404) {
+                dbg(`${filePath} not found when attempting delete`, 'debug');
+                // Nothing to delete
+                delete state.fileIndex[dateStr];
+                return true;
+            }
+        } catch (e) { dbg(`Could not fetch ${filePath} before delete: ${e.message}`, 'warn'); }
+
+        if (!fileSha) {
+            dbg(`No SHA found for ${filePath}; aborting delete`, 'warn');
+            return false;
+        }
+
+        const body = { message: `Delete date ${dateStr}: ${new Date().toISOString()}`, sha: fileSha };
+        const delRes = await fetch(url, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const txt = await delRes.text().catch(() => '');
+        if (delRes.ok) {
+            delete state.fileIndex[dateStr];
+            dbg(`Deleted ${filePath}`, 'info');
+            return true;
+        } else {
+            let err = {};
+            try { err = JSON.parse(txt); } catch (e) { err = { message: txt }; }
+            dbg(`Failed to delete ${filePath}: ${err.message || delRes.statusText}`, 'error', err);
+            return false;
+        }
+    } catch (err) {
+        dbg(`deleteDateFile error (${dateStr}): ${err.message}`, 'error');
+        return false;
     }
 }
 
@@ -981,16 +1275,66 @@ async function pushToGit() {
 // The app now uses the single, earlier `render()` function which
 // filters entries to show only today's entries on the tracker page.
 
-function deleteEntry(index) {
-    if (confirm('Delete this entry?')) {
-        state.entries.splice(index, 1);
-        state.hasUnsavedChanges = true;
-        render();
-        
-        // Auto-save if enabled
-        if (getConfig('autoSave')) {
-            autoSave();
+async function deleteEntry(index) {
+    if (!confirm('Delete this entry?')) return;
+
+    // Compute the removed entry and remaining entries for its date WITHOUT mutating state yet.
+    const removed = state.entries[index];
+    if (!removed) return;
+    let dateStr = getEntryDate(removed) || null;
+    if (!dateStr && removed && removed.timestamp) {
+        try { dateStr = formatDateLocal(new Date(removed.timestamp)); dbg(`Inferred date from timestamp for removed entry: ${dateStr}`, 'debug'); } catch (e) {}
+    }
+
+    state.hasUnsavedChanges = true;
+
+    try {
+        if (dateStr) {
+            const remaining = state.entries.filter((e, i) => {
+                if (i === index) return false;
+                const d = getEntryDate(e);
+                return d === dateStr;
+            });
+            dbg(`Delete (pre-write): remaining entries for ${dateStr} = ${remaining.length}`, 'debug');
+
+            let ok = false;
+            if (remaining.length === 0) {
+                dbg(`No remaining entries for ${dateStr}; deleting file instead of writing empty array`, 'info');
+                ok = await deleteDateFile(dateStr);
+                dbg(`deleteDateFile result for ${dateStr}: ${ok}`, ok ? 'info' : 'error');
+            } else {
+                ok = await pushDateFile(dateStr, remaining);
+                dbg(`pushDateFile result for ${dateStr}: ${ok} (remaining=${remaining.length})`, ok ? 'info' : 'error');
+            }
+
+            if (ok) {
+                // Now apply removal locally and re-render
+                state.entries.splice(index, 1);
+                state.hasUnsavedChanges = false;
+                render();
+                renderHistory();
+            } else {
+                dbg('Delete aborted: remote write/delete failed; local state preserved', 'error');
+                alert('Failed to persist delete to repo. Check logs.');
+                state.hasUnsavedChanges = false;
+            }
+        } else {
+            dbg('Removed entry had no determinable date; performing full per-date replace for remaining dated entries', 'warn', removed);
+            const ok = await pushEntriesByDate(state.entries.filter((e, i) => i !== index), { mode: 'replace' });
+            if (ok !== false) {
+                state.entries.splice(index, 1);
+                render();
+                renderHistory();
+            } else {
+                dbg('Full replace failed; local state preserved', 'error');
+                alert('Failed to persist delete to repo. Check logs.');
+            }
+            state.hasUnsavedChanges = false;
         }
+    } catch (e) {
+        dbg(`Auto-save delete failed: ${e.message}`, 'error');
+        alert('Error during delete persistence. Check logs.');
+        state.hasUnsavedChanges = false;
     }
 }
 
@@ -1058,7 +1402,7 @@ function updateSelectedCount() {
     if (countEl) countEl.textContent = state.selectedEntries.size;
 }
 
-function bulkDelete() {
+async function bulkDelete() {
     if (state.selectedEntries.size === 0) {
         alert('No entries selected.');
         return;
@@ -1068,20 +1412,68 @@ function bulkDelete() {
         return;
     }
     
-    // Convert to array and sort descending to delete from end first
-    const indices = Array.from(state.selectedEntries).sort((a, b) => b - a);
-    indices.forEach(index => {
-        state.entries.splice(index, 1);
-    });
-    
-    state.selectedEntries.clear();
+    // Convert to array and sort ascending to compute removals
+    const indices = Array.from(state.selectedEntries).sort((a, b) => a - b);
+
+    // Compute affected dates and remaining arrays WITHOUT mutating local state
+    const toRemove = new Set(indices);
+    const affectedDates = new Set();
+    let undatedRemoved = 0;
+    const remainingByDate = {};
+
+    for (let i = 0; i < state.entries.length; i++) {
+        const e = state.entries[i];
+        const d = getEntryDate(e) || null;
+        if (!d) {
+            if (toRemove.has(i)) undatedRemoved++;
+            continue;
+        }
+        if (!remainingByDate[d]) remainingByDate[d] = [];
+        if (!toRemove.has(i)) remainingByDate[d].push(e);
+        if (toRemove.has(i)) affectedDates.add(d);
+    }
+
     state.hasUnsavedChanges = true;
-    updateSelectedCount();
-    render();
-    renderHistory();
-    
-    dbg(`Bulk deleted ${indices.length} entries`, 'info');
-    
+    dbg(`Bulk delete (pre-write): will remove ${indices.length} entries across ${Object.keys(remainingByDate).length} dates`, 'info');
+
+    try {
+        // Persist each affected date first
+        for (const dateStr of affectedDates) {
+            const remaining = remainingByDate[dateStr] || [];
+            dbg(`Bulk delete: remaining entries for ${dateStr} = ${remaining.length}`, 'debug');
+            if (remaining.length === 0) {
+                dbg(`No remaining entries for ${dateStr}; deleting file instead of writing empty array`, 'info');
+                const ok = await deleteDateFile(dateStr);
+                dbg(`deleteDateFile result for ${dateStr}: ${ok}`, ok ? 'info' : 'error');
+                if (!ok) throw new Error(`Failed to delete ${dateStr}`);
+            } else {
+                const ok = await pushDateFile(dateStr, remaining);
+                dbg(`pushDateFile result for ${dateStr}: ${ok} (remaining=${remaining.length})`, ok ? 'info' : 'error');
+                if (!ok) throw new Error(`Failed to write ${dateStr}`);
+            }
+        }
+
+        if (undatedRemoved > 0) {
+            dbg(`Bulk delete removed ${undatedRemoved} undated entries; performing best-effort full per-date replace for remaining dated entries`, 'warn');
+            const ok = await pushEntriesByDate(state.entries.filter((e, i) => !toRemove.has(i)), { mode: 'replace' });
+            if (ok === false) throw new Error('Failed to replace undated entries');
+        }
+
+        // All remote writes succeeded — now remove locally and update UI
+        const removeIdx = indices.slice().sort((a, b) => b - a);
+        for (const idx of removeIdx) state.entries.splice(idx, 1);
+        state.selectedEntries.clear();
+        state.hasUnsavedChanges = false;
+        updateSelectedCount();
+        render();
+        renderHistory();
+        dbg(`Bulk deleted ${indices.length} entries`, 'info');
+    } catch (e) {
+        dbg(`Bulk delete auto-save failed: ${e.message}`, 'error');
+        alert('Failed to persist bulk delete. Check logs.');
+        state.hasUnsavedChanges = false;
+    }
+
     // Exit select mode after action
     toggleSelectMode();
 }
@@ -1116,7 +1508,7 @@ function exportSelectedToCsv() {
     showCsvExportModal(csv, selectedData.length, 'tracker');
 }
 
-function addEntry() {
+async function addEntry() {
     const data = getFormData();
     if (!data) return;
     
@@ -1140,13 +1532,17 @@ function addEntry() {
     render();
     renderHistory(); // Update history view
     clearFormFields();
-    // If auto-save is enabled, schedule an automatic push
+    // Auto-save: push this entry to the per-date file
     try {
-        if (getConfig('autoSave')) {
-            autoSave();
+        const dateStr = getEntryDate(data) || getTodayString();
+        try {
+            const ok = await pushEntryForDate(dateStr, data);
+            if (ok) state.hasUnsavedChanges = false;
+        } catch (err) {
+            dbg(`Auto-save per-date push failed: ${err.message}`, 'error');
         }
     } catch (e) {
-        // ignore config errors
+        dbg(`Auto-save error: ${e.message}`, 'error');
     }
     
     // Remove loading after a short delay
@@ -1159,25 +1555,79 @@ function addEntry() {
 function renderHistory() {
     const container = document.getElementById('history-container');
     if (!container) return;
+    // If the user requested a specific date/range that's not present in `state.entries`,
+    // fetch the full data folder (only once) so history can show older dates.
+    try {
+        if ((state.dateRangeStart || state.dateRangeEnd) && !state.historyFetchInProgress) {
+            // Build list of target dates to check (if single day, just that; if range, check start..end inclusive)
+            const targets = [];
+            if (state.dateRangeStart && state.dateRangeEnd) {
+                let cur = new Date(state.dateRangeStart);
+                const end = new Date(state.dateRangeEnd);
+                while (cur <= end) {
+                    targets.push(formatDateLocal(cur));
+                    cur.setDate(cur.getDate() + 1);
+                }
+            } else if (state.dateRangeStart) {
+                targets.push(state.dateRangeStart);
+            } else if (state.dateRangeEnd) {
+                targets.push(state.dateRangeEnd);
+            }
+
+            // Require ALL target dates to be present locally before skipping a full fetch.
+            // Previously this used `some(...)` which incorrectly skipped fetching when
+            // the requested range included any single loaded date (e.g. today). That
+            // caused 'Last 7 days' to show only today's entries if the app had only
+            // fetched today's file.
+            const hasAll = targets.every(td => state.entries.some(e => getEntryDate(e) === td));
+            if (!hasAll) {
+                const key = targets.join(',');
+                if (!state.historyPrefetchAttempts.has(key)) {
+                    state.historyPrefetchAttempts.add(key);
+                    state.historyFetchInProgress = true;
+                    dbg(`History requested dates [${targets.join(',')}] not loaded; fetching full data folder`, 'info');
+                    fetchFromGit(false).then(() => {
+                        state.historyFetchInProgress = false;
+                        renderHistory();
+                    }).catch(err => {
+                        state.historyFetchInProgress = false;
+                        dbg(`Failed to fetch full data folder for history: ${err.message}`, 'error');
+                    });
+                    // Return early only when we actually kick off a fetch to avoid duplicate requests.
+                    return;
+                } else {
+                    dbg(`Already attempted prefetch for [${key}] — skipping additional fetch to avoid loop`, 'warn');
+                    // Continue to render with whatever entries are currently loaded (may be empty).
+                }
+            }
+        }
+    } catch (e) { dbg(`renderHistory prefetch check error: ${e.message}`, 'error'); }
     
     const foodFilter = document.getElementById('filter-food')?.value.toLowerCase();
+    dbg(`renderHistory start: totalEntries=${state.entries.length} dateRangeStart=${state.dateRangeStart} dateRangeEnd=${state.dateRangeEnd} foodFilter=${foodFilter || 'none'}`, 'debug');
     
     let filtered = state.entries;
     
-    // Apply date range filter
+    // Apply date range filter (use canonical entry date)
     if (state.dateRangeStart && state.dateRangeEnd) {
         if (state.dateRangeStart === state.dateRangeEnd) {
             // Single day
-            filtered = filtered.filter(e => e.date === state.dateRangeStart);
+            filtered = filtered.filter(e => getEntryDate(e) === state.dateRangeStart);
         } else {
             // Date range
-            filtered = filtered.filter(e => e.date >= state.dateRangeStart && e.date <= state.dateRangeEnd);
+            filtered = filtered.filter(e => {
+                const ed = getEntryDate(e);
+                return ed && ed >= state.dateRangeStart && ed <= state.dateRangeEnd;
+            });
         }
     } // If no date range is set, show all entries by default
     
     if (foodFilter) {
         filtered = filtered.filter(e => e.food?.toLowerCase().includes(foodFilter));
     }
+
+    dbg(`Filtered history: ${filtered.length} entries after date/food filters`, 'debug');
+    
     
     // Sort by timestamp descending (newest first)
     filtered.sort((a, b) => {
@@ -1192,7 +1642,7 @@ function renderHistory() {
     document.getElementById('history-total-calories').innerText = Math.round(totalCal);
     
     // Calculate avg per day
-    const uniqueDates = [...new Set(filtered.map(e => e.date))];
+    const uniqueDates = [...new Set(filtered.map(e => getEntryDate(e)).filter(Boolean))];
     const avgPerDay = uniqueDates.length > 0 ? Math.round(totalCal / uniqueDates.length) : 0;
     document.getElementById('history-avg-calories').innerText = avgPerDay;
     
@@ -1212,8 +1662,10 @@ function renderHistory() {
     }
 
     // Group entries by date (descending). Each group will be a page unit for pagination.
+    dbg(`Grouping ${filtered.length} entries by date`, 'debug');
     const groups = groupByDate(filtered); // { date: [entries] }
     const sortedDates = Object.keys(groups).sort((a, b) => (new Date(b).getTime() - new Date(a).getTime()));
+    dbg(`Found ${sortedDates.length} date groups`, 'info');
 
     // Pagination state for history: entriesPerPage here means number of date groups per page
     const perPage = 5;
@@ -1246,6 +1698,7 @@ function renderHistory() {
     // Determine which date groups to show on this page
     const startIdx = (state.historyPage - 1) * perPage;
     const pageDates = sortedDates.slice(startIdx, startIdx + perPage);
+    dbg(`Rendering history page ${state.historyPage} (dates on page: ${pageDates.join(', ')})`, 'debug');
 
     // Render each date group
     pageDates.forEach(dateStr => {
@@ -1263,6 +1716,9 @@ function renderHistory() {
 
         group.forEach(entry => {
             const globalIndex = state.entries.indexOf(entry);
+            if (globalIndex === -1) {
+                dbg(`Warning: entry for date ${dateStr} not found in state.entries via indexOf — possible identity mismatch`, 'warn', entry);
+            }
             const d = document.createElement('div');
             d.className = 'entry-card';
             d.id = `entry-${globalIndex}`;
@@ -1308,17 +1764,43 @@ function renderHistory() {
             container.appendChild(d);
         });
     });
+    dbg('renderHistory complete', 'debug');
 }
 
 // Helper: group entries by `date` (returns { dateStr: [entries] })
 function groupByDate(entries) {
     const map = {};
     entries.forEach(e => {
-        const d = e.date || (e.timestamp ? new Date(e.timestamp).toISOString().split('T')[0] : 'Unknown');
+        const d = getEntryDate(e) || 'Unknown';
+        if (!getEntryDate(e)) {
+            dbg('Entry missing date/timestamp while grouping; assigning Unknown', 'warn', e);
+        }
         if (!map[d]) map[d] = [];
         map[d].push(e);
     });
     return map;
+}
+
+// Helper: return canonical YYYY-MM-DD date for an entry (prefer `timestamp`, fall back to `date`)
+function getEntryDate(entry) {
+    if (!entry) return null;
+    // Prefer an explicit ISO `date` field when provided (user intent).
+    if (entry.date && typeof entry.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(entry.date)) return entry.date;
+    // Try parsing loose date strings next.
+    if (entry.date) {
+        try {
+            const d2 = new Date(entry.date);
+            if (!isNaN(d2.getTime())) return formatDateLocal(d2);
+        } catch (e) { /* ignore */ }
+    }
+    // Finally, fall back to timestamp-derived local date.
+    if (entry.timestamp) {
+        try {
+            const d = new Date(entry.timestamp);
+            if (!isNaN(d.getTime())) return formatDateLocal(d);
+        } catch (e) { /* ignore */ }
+    }
+    return null;
 }
 
 function addDaysToDateString(dateStr, days) {
@@ -1510,7 +1992,7 @@ function historyBulkDelete() {
     renderHistory();
     
     dbg(`Bulk deleted ${indices.length} entries from history`, 'info');
-    try { if (getConfig('autoSave')) autoSave(); } catch (e) {}
+    try { autoSave(); } catch (e) { dbg(`Auto-save error: ${e.message}`, 'error'); }
     toggleHistorySelectMode();
 }
 
@@ -1633,18 +2115,29 @@ function saveEdit(index) {
     dbg(`Entry ${index} updated`, 'info');
     // Mark as changed and auto-save if configured
     state.hasUnsavedChanges = true;
-    try {
-        if (getConfig('autoSave')) autoSave();
-    } catch (e) {}
+    try { autoSave(); } catch (e) { dbg(`Auto-save error: ${e.message}`, 'error'); }
 }
 
-function deleteEntryGlobal(index) {
-    if (confirm('Delete this entry?')) {
-        state.entries.splice(index, 1);
-        state.hasUnsavedChanges = true;
-        render();
-        renderHistory();
-        try { if (getConfig('autoSave')) autoSave(); } catch (e) {}
+async function deleteEntryGlobal(index) {
+    if (!confirm('Delete this entry?')) return;
+    const removed = state.entries.splice(index, 1)[0];
+    state.hasUnsavedChanges = true;
+    render();
+    renderHistory();
+    try {
+        const dateStr = getEntryDate(removed) || null;
+        if (dateStr) {
+            const remaining = state.entries.filter(e => {
+                const d = getEntryDate(e) || getTodayString();
+                return d === dateStr;
+            });
+            await pushDateFile(dateStr, remaining);
+        } else {
+            await pushEntriesByDate(state.entries, { mode: 'replace' });
+        }
+        state.hasUnsavedChanges = false;
+    } catch (e) {
+        dbg(`Auto-save delete failed: ${e.message}`, 'error');
     }
 }
 
@@ -1918,16 +2411,11 @@ window.onload = async () => {
     const r = localStorage.getItem('gt_repo');
     if (t) document.getElementById('cfg-token').value = t;
     if (r) document.getElementById('cfg-repo').value = r;
-    // Restore autosave checkbox from config
+    // Auto-save is always enabled; remove any legacy autosave UI element
     const autoCheckbox = document.getElementById('cfg-autosave');
     if (autoCheckbox) {
-        try {
-            autoCheckbox.checked = !!getConfig('autoSave');
-        } catch (e) {
-            autoCheckbox.checked = false;
-        }
+        try { autoCheckbox.closest('label')?.remove(); } catch (e) { autoCheckbox.remove(); }
     }
-    // Update UI to reflect autosave state (adds icons to publish buttons)
     updateAutoSaveUI();
 
     // Restore daily budget input
@@ -1945,9 +2433,9 @@ window.onload = async () => {
     // Auto-fetch only if schema loaded successfully
     if (schemaLoaded) {
         if (getConfig('autoFetch') && t && r) {
-            fetchFromGit();
+            // Only fetch today's file for the tracker on initial load for speed
+            fetchFromGit(true);
         } else {
-            // Do not load any local/cached data when credentials missing
             dbg('No auto-fetch; entries remain as-is (no cache)', 'debug');
         }
     }
@@ -1963,26 +2451,28 @@ window.onload = async () => {
         render();
     } catch (e) { /* ignore if DOM not ready */ }
 
-    // Warn user about unsaved changes before leaving only when auto-save is OFF
-    window.addEventListener('beforeunload', (e) => {
-        try {
-            const autoSaveEnabled = getConfig('autoSave');
-            if (!autoSaveEnabled && state.hasUnsavedChanges) {
-                // Modern browsers ignore the custom string, but setting returnValue triggers the dialog
-                const msg = 'Auto-save is off and you have unsaved changes. These changes will NOT be stored if you leave or refresh.';
-                e.preventDefault();
-                e.returnValue = msg;
-                return msg;
-            }
-        } catch (err) {
-            // If config lookup fails, fall back to previous behavior
-            if (state.hasUnsavedChanges) {
-                e.preventDefault();
-                e.returnValue = '';
-                return '';
-            }
-        }
-    });
+    // Auto-save is always on; no unload warning necessary.
+    window.addEventListener('beforeunload', (e) => {});
+};
+
+// Debug helper: write a small test entry to today's per-day file (call from browser console)
+window.testWriteSample = async function() {
+    try {
+        const sample = {
+            timestamp: new Date().toISOString(),
+            date: getTodayString(),
+            food: 'TEST ENTRY',
+            calories: 1,
+            time: new Date().toLocaleTimeString()
+        };
+        dbg('testWriteSample: calling pushEntryForDate with sample', 'info', sample);
+        const ok = await pushEntryForDate(getTodayString(), sample);
+        dbg('testWriteSample result: ' + (ok ? 'ok' : 'failed'), 'info');
+        // Refresh today's file
+        try { await fetchFromGit(true); } catch (e) { dbg('testWriteSample fetchFromGit failed: ' + e.message, 'error'); }
+    } catch (e) {
+        dbg('testWriteSample error: ' + e.message, 'error');
+    }
 };
 
 // --- CSV IMPORT FUNCTIONALITY ---
@@ -2448,14 +2938,10 @@ async function importCsvEntries() {
 
     dbg(`Imported ${csvParsedData.length} entries`, 'info');
 
-    // Auto-save behavior: if user has enabled autoSave in config, push to GitHub now
+    // Auto-save behavior: always push imported CSV to per-date files (append mode)
     try {
-        const autoSaveEnabled = getConfig('autoSave');
-        if (autoSaveEnabled) {
-            dbg('Auto-save enabled: pushing imported CSV to GitHub', 'info');
-            // pushToGit may show its own UI; await it if possible
-            await pushToGit();
-        }
+        dbg('Auto-save: pushing imported CSV to GitHub (per-date append)', 'info');
+        await pushEntriesByDate(csvParsedData, { mode: 'append' });
     } catch (e) {
         dbg(`Auto-save push failed: ${e.message}`, 'error');
     }
