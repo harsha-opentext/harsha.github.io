@@ -316,7 +316,19 @@ function buildEntryCard(entry, globalIndex, opts = {}) {
     const timeEl = document.createElement('div');
     timeEl.style.color = 'var(--text-secondary)';
     timeEl.style.fontSize = '13px';
-    timeEl.textContent = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : (entry.time || '');
+    // Show time without seconds for cleaner display
+    let displayTime = '';
+    if (entry.timestamp) {
+        try {
+            displayTime = new Date(entry.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        } catch (e) {
+            displayTime = entry.time || '';
+        }
+    } else if (entry.time) {
+        // Strip seconds if present (e.g. "12:34:56 AM" -> "12:34 AM")
+        displayTime = String(entry.time).replace(/:(\d{2})(?=(?:\s?[APMapm]{2})?$)/, '');
+    }
+    timeEl.textContent = displayTime;
 
     left.appendChild(foodEl);
     left.appendChild(timeEl);
