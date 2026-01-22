@@ -10,6 +10,15 @@
     <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="config.js"></script>
+    <style>
+    /* iOS-style toggle switch */
+    .switch { position: relative; display: inline-block; width:46px; height:28px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #d1d1d6; transition: .18s; border-radius: 999px; }
+    .slider:before { position: absolute; content: ""; height: 22px; width: 22px; left: 3px; top: 3px; background: #fff; transition: .18s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
+    .switch input:checked + .slider { background: #34c759; }
+    .switch input:checked + .slider:before { transform: translateX(18px); }
+    </style>
 </head>
 <body>
 
@@ -70,18 +79,18 @@
             <button class="btn-secondary" onclick="exportSelectedToCsv()" style="flex: 1;">📄 Export to CSV</button>
         </div>
         
-        <div class="stat-card">
-            <div class="stat-label">Total Today</div>
-            <div class="stat-value" id="total-kcal">0 kcal</div>
-        </div>
-
-        <div class="budget-card" style="margin-top:12px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <div style="font-weight:600;">Daily Budget</div>
-                <div id="budget-values" style="font-size:13px; color:var(--text-secondary);">0 / 2000 kcal</div>
+        <!-- Prominent budget bar replaces the old 'Total Today' stat -->
+        <div class="prominent-budget-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <div style="font-weight:700; font-size:18px;">Daily Budget</div>
+                <div id="budget-values" style="font-size:14px; color:var(--text-secondary);">0 / 2000 kcal</div>
             </div>
-            <div class="budget-bar-outer">
-                <div id="budget-bar-fill" class="budget-bar-fill" style="width: 0%;"></div>
+            <div class="budget-bar-outer" aria-hidden="false">
+                <div id="budget-bar-fill" class="budget-bar-fill" style="width: 0%; display:flex;">
+                    <div id="budget-seg-fat" class="budget-seg fat" title="Fat"></div>
+                    <div id="budget-seg-protein" class="budget-seg protein" title="Protein"></div>
+                    <div id="budget-seg-carbs" class="budget-seg carbs" title="Carbs"></div>
+                </div>
             </div>
         </div>
 
@@ -169,6 +178,27 @@
             <div class="chart-container">
                 <h3>Macro Distribution</h3>
                 <canvas id="chart-macro-distribution"></canvas>
+            </div>
+
+            <div class="chart-container">
+                <h3>Health Score vs Macro Amount</h3>
+                <p style="color:var(--text-secondary); font-size:13px; margin-top:6px;">Shows average macro amount per Health Score bin. Toggle normalization or raw points.</p>
+                <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
+                    <label style="font-size:13px; color:var(--text-secondary);">Mode:
+                        <select id="macro-health-mode" onchange="updateAnalytics()" style="margin-left:8px; padding:6px; font-size:13px;">
+                            <option value="absolute">Absolute (g)</option>
+                            <option value="per100kcal">Per 100 kcal</option>
+                        </select>
+                    </label>
+                    <label style="font-size:13px; color:var(--text-secondary); display:flex; align-items:center; gap:10px;">
+                        <span>Show raw points</span>
+                        <label class="switch" aria-label="Show raw points">
+                            <input type="checkbox" id="macro-health-points" checked onchange="updateAnalytics()">
+                            <span class="slider"></span>
+                        </label>
+                    </label>
+                </div>
+                <canvas id="chart-macro-health-distribution"></canvas>
             </div>
         </div>
     </div>
@@ -260,8 +290,9 @@
                 <div id="csv-input-section">
                     <p style="color: var(--text-secondary); margin-bottom: 12px;">Paste your CSV data below. Expected format:</p>
                     <div style="display: flex; gap: 8px; align-items: flex-start;">
-                        <pre id="example-csv" style="background: var(--bg); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-secondary);">2026-01-15,9:00 AM,Eggs (2 whole + 2 whites),220,20.0,2.0,10.0
-2026-01-15,,Korean BBQ noodles (90 g),289,7.4,37.4,12.2</pre>
+                        <pre id="example-csv" style="background: var(--bg); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-secondary);">date,time,food,calories,protein,carbs,fat,healthScore
+                        2026-01-15,9:00 AM,Eggs (2 whole + 2 whites),220,20.0,2.0,10.0,7
+                        2026-01-15,,Korean BBQ noodles (90 g),289,7.4,37.4,12.2,6</pre>
                         <button class="btn-secondary" style="height: 40px; margin-top: 8px;" onclick="copyExampleCsv()">📋 Copy</button>
                     </div>
                     <textarea id="csv-input" placeholder="Paste CSV data here..." style="width: 100%; height: 200px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 13px; margin: 12px 0;"></textarea>
@@ -329,6 +360,25 @@
             <div style="padding: 16px; display:flex; gap:8px; justify-content: flex-end;">
                 <button class="btn-secondary" onclick="closeTimePicker()">Cancel</button>
                 <button class="btn-primary" onclick="confirmTimePicker()">Set</button>
+            </div>
+        </div>
+
+            
+    </div>
+    <!-- App-level Confirm Modal -->
+    <div id="app-confirm-modal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width:420px;">
+            <div class="modal-header">
+                <h2 id="confirm-title">Confirm</h2>
+                <button onclick="closeConfirm()" class="modal-close">✕</button>
+            </div>
+            <div class="modal-body">
+                <p id="confirm-message" style="font-size:15px; color:var(--text);">Are you sure?</p>
+                <div id="confirm-details" style="margin-top:12px; max-height:220px; overflow:auto; color:var(--text-secondary); font-size:13px; border-top:1px dashed var(--border); padding-top:8px; display:none;"></div>
+            </div>
+            <div style="padding: 16px; display:flex; gap:8px; justify-content: flex-end;">
+                <button id="confirm-no" class="btn-secondary">Cancel</button>
+                <button id="confirm-yes" class="btn-danger">Delete</button>
             </div>
         </div>
     </div>
