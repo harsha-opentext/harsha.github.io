@@ -1833,6 +1833,44 @@ function createEntryCard(entry, globalIndex, isRangeView, dateStr) {
 }
 
 function renderHistory() {
+    // Hide any previous transient loading state when rendering completes
+    function hideHistoryLoading() {
+        try {
+            const ov = document.getElementById('history-loading-overlay');
+            if (ov) ov.remove();
+        } catch (e) { /* ignore */ }
+    }
+
+    // Ensure spinner keyframes exist
+    function ensureSpinnerStyle() {
+        if (document.getElementById('gt-spinner-style')) return;
+        const s = document.createElement('style');
+        s.id = 'gt-spinner-style';
+        s.textContent = `@keyframes gt-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`;
+        document.head.appendChild(s);
+    }
+
+    // Show a translucent overlay with spinner inside the history container
+    function showHistoryLoading() {
+        try {
+            const container = document.getElementById('history-container');
+            if (!container) return;
+            if (document.getElementById('history-loading-overlay')) return;
+            ensureSpinnerStyle();
+            const ov = document.createElement('div');
+            ov.id = 'history-loading-overlay';
+            ov.style.cssText = 'position: absolute; inset: 0; display:flex; align-items:center; justify-content:center; background: rgba(255,255,255,0.7); z-index: 1000; pointer-events: none;';
+            const spinner = document.createElement('div');
+            spinner.style.cssText = 'width:36px; height:36px; border-radius:50%; border:4px solid rgba(0,0,0,0.08); border-top:4px solid var(--primary); animation: gt-spin 1s linear infinite;';
+            ov.appendChild(spinner);
+            // Position overlay relative to container
+            container.style.position = container.style.position || 'relative';
+            container.appendChild(ov);
+        } catch (e) { /* ignore */ }
+    }
+
+    // If a previous caller set a transient loading flag, show spinner now
+    if (document.body.__historyLoadingFlag) showHistoryLoading();
     const container = document.getElementById('history-container');
     if (!container) return;
 
@@ -1868,7 +1906,9 @@ function renderHistory() {
     } catch (e) { dbg(`renderHistory sync error: ${e && e.message ? e.message : String(e)}`, 'error'); }
 
     // If a prefetch was initiated, the helper already kicked off a fetch and will recall renderHistory when done.
-    if (ensureHistoryPrefetchIfNeeded()) return;
+    if (ensureHistoryPrefetchIfNeeded()) {
+        return;
+    }
 
     const filtered = computeFilteredEntries();
     buildHistoryStats(filtered);
@@ -1911,6 +1951,7 @@ function renderHistory() {
         });
     });
     dbg('renderHistory complete', 'debug');
+    try { hideHistoryLoading(); document.body.__historyLoadingFlag = false; } catch (e) { /* ignore */ }
 }
 
 // Helper: group entries by `date` (returns { dateStr: [entries] })
@@ -1993,6 +2034,8 @@ function handleRangeSelect() {
     }
 
     state.historyPage = 1;
+    // Indicate loading while history range is being refreshed
+    try { document.body.__historyLoadingFlag = true; } catch (e) { /* ignore */ }
     renderHistory();
 }
 
