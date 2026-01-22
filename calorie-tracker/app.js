@@ -2757,7 +2757,7 @@ function parseCsv() {
     }
 }
 
-function copyExampleCsv() {
+async function copyExampleCsv() {
     const pre = document.getElementById('example-csv');
     if (!pre) {
         alert('Example CSV not found');
@@ -2769,77 +2769,45 @@ function copyExampleCsv() {
         return;
     }
 
-    // Helper to finalize on success
-    const onSuccess = () => {
-        showNotification('📋 Example CSV copied to clipboard');
-    };
+    const onSuccess = () => showNotification('📋 Example CSV copied to clipboard');
 
-    // If Clipboard API available, use it
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(onSuccess).catch(err => {
-            // Fallback to range selection
-            try {
-                const range = document.createRange();
-                range.selectNodeContents(pre);
-                const sel = window.getSelection();
-                sel.removeAllRanges();
-                sel.addRange(range);
-                const ok = document.execCommand('copy');
-                sel.removeAllRanges();
-                if (ok) {
-                    onSuccess();
-                    return;
-                }
-            } catch (e) {
-                // ignore
-            }
-            // Final fallback: textarea
-            const textarea = document.createElement('textarea');
-            textarea.value = text;
-            textarea.style.position = 'fixed'; textarea.style.opacity = '0';
-            document.body.appendChild(textarea);
-            textarea.select();
-            try {
-                document.execCommand('copy');
-                onSuccess();
-            } catch (e) {
-                alert('Failed to copy example CSV to clipboard');
-            }
-            textarea.remove();
-        });
-        return;
+    // Try modern Clipboard API first (async/await for clearer error handling)
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+            onSuccess();
+            return;
+        }
+    } catch (err) {
+        dbg(`navigator.clipboard.writeText failed: ${err && err.message ? err.message : String(err)}`, 'warn', err);
+        // fall through to fallback below
     }
 
-    // If no clipboard API, try range selection first
+    // Fallback: use an offscreen textarea which is the most reliable cross-browser approach
     try {
-        const range = document.createRange();
-        range.selectNodeContents(pre);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        // Move off-screen and make readonly to avoid mobile keyboards
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        textarea.setSelectionRange(0, textarea.value.length);
+
         const ok = document.execCommand('copy');
-        sel.removeAllRanges();
+        document.body.removeChild(textarea);
         if (ok) {
             onSuccess();
             return;
         }
-    } catch (e) {
-        // ignore
-    }
-
-    // Fallback textarea
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed'; textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-    try {
-        document.execCommand('copy');
-        onSuccess();
-    } catch (e) {
+        throw new Error('execCommand(copy) returned false');
+    } catch (err) {
+        dbg(`Fallback copy failed: ${err && err.message ? err.message : String(err)}`, 'error', err);
         alert('Failed to copy example CSV to clipboard');
     }
-    textarea.remove();
 }
 
 function displayCsvPreview() {
