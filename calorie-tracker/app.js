@@ -55,6 +55,26 @@ function dbg(msg, type = 'info', raw = null) {
     } catch (e) { /* ignore */ }
 }
 
+// Lightweight toast notification (non-blocking)
+function showNotification(message, type = 'info') {
+    try {
+        const n = document.createElement('div');
+        n.className = 'gt-notification';
+        n.textContent = message;
+        // basic styling placed inline to avoid touching CSS files
+        n.style.cssText = 'position: fixed; top: 16px; right: 16px; background: var(--card-bg); color: var(--text); padding: 10px 14px; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,0.12); z-index: 10000; font-size: 13px; font-weight:600; opacity:1; transition: opacity 0.25s;';
+        if (type === 'error') {
+            n.style.background = '#ff3b30';
+            n.style.color = '#fff';
+        } else if (type === 'success') {
+            n.style.background = 'linear-gradient(90deg,#34c759 0%, #30d158 100%)';
+            n.style.color = '#fff';
+        }
+        document.body.appendChild(n);
+        setTimeout(() => { n.style.opacity = '0'; setTimeout(() => n.remove(), 300); }, 2500);
+    } catch (e) { /* ignore */ }
+}
+
 function toggleViewMode() {
     state.viewMode = state.viewMode === 'today' ? 'all' : 'today';
     const btn = document.getElementById('view-toggle-btn');
@@ -2529,7 +2549,7 @@ async function copyCsvToClipboard() {
         textarea.select();
         try {
             document.execCommand('copy');
-            alert('CSV copied to clipboard!');
+            showNotification('CSV copied to clipboard', 'success');
             closeCsvExportModal();
             
             // Exit select mode
@@ -2539,7 +2559,7 @@ async function copyCsvToClipboard() {
                 toggleHistorySelectMode();
             }
         } catch (e) {
-            alert('Failed to copy. Please try the download option.');
+            showNotification('Failed to copy. Please try the download option.', 'error');
         }
         textarea.remove();
     }
@@ -2760,12 +2780,12 @@ function parseCsv() {
 async function copyExampleCsv() {
     const pre = document.getElementById('example-csv');
     if (!pre) {
-        alert('Example CSV not found');
+        showNotification('Example CSV not found', 'error');
         return;
     }
     const text = (pre.textContent || pre.innerText || '').trim();
     if (!text) {
-        alert('Example CSV is empty');
+        showNotification('Example CSV is empty', 'error');
         return;
     }
 
@@ -2806,7 +2826,7 @@ async function copyExampleCsv() {
         throw new Error('execCommand(copy) returned false');
     } catch (err) {
         dbg(`Fallback copy failed: ${err && err.message ? err.message : String(err)}`, 'error', err);
-        alert('Failed to copy example CSV to clipboard');
+                showNotification('Failed to copy example CSV to clipboard', 'error');
     }
 }
 
