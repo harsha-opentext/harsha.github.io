@@ -151,6 +151,17 @@ Put these exports into your shell profile or CI secrets when running automated c
 - Normal behavior - per-day file for a given date may not exist yet (e.g., `data/2026-01-21.json`).
 - The app will create the per-day file on first sync for that date.
 
+**Super-Important — Deletion Safety (READ THIS):**
+- Never perform bulk delete operations without a confirmed backup branch. A previous bug caused a "select all → delete" flow to remove many per-day files from the remote `data/` folder. Follow these rules when changing deletion code or the confirm UX:
+  - Always show exact items to be deleted in the confirmation UI (date/file names and entry previews).
+  - Use a Promise-based in-app confirm modal (`showConfirm`) rather than `window.confirm`, and ensure the modal closes reliably on both success and failure.
+  - Perform remote writes (per-date updates/deletes) first and only mutate local `state.entries` after remote operations succeed.
+  - When implementing bulk deletes, restrict actions to only the affected dates — do not reconcile the entire `data/` folder unless explicitly intended.
+  - Before pushing any bulk-changing commit, create a backup branch in the target repo (e.g., `backup-before-restore-<timestamp>`) and record the pre-change SHA in logs.
+  - Add clear logging around delete/write operations and surface failures to the user (do not silently swallow write errors).
+
+This note should be followed whenever editing `calorie-tracker/app.js` delete or sync logic.
+
 ## Testing Checklist
 
 1. ✅ **Always run via HTTP server** - never open index.html directly

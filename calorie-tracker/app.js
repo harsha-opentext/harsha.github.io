@@ -63,14 +63,21 @@ function showNotification(message, type = 'info') {
         n.textContent = message;
         // basic styling placed inline to avoid touching CSS files
         n.style.cssText = 'position: fixed; top: 16px; right: 16px; background: var(--card-bg); color: var(--text); padding: 10px 14px; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,0.12); z-index: 10000; font-size: 13px; font-weight:600; opacity:1; transition: opacity 0.25s;';
-        if (type === 'error') {
+        // Types: 'error'|'delete' (red), 'write'|'success' (green), 'read' (blue), default (card bg)
+        if (type === 'error' || type === 'delete') {
             n.style.background = '#ff3b30';
             n.style.color = '#fff';
-        } else if (type === 'success') {
+        } else if (type === 'success' || type === 'write') {
             n.style.background = 'linear-gradient(90deg,#34c759 0%, #30d158 100%)';
+            n.style.color = '#fff';
+        } else if (type === 'read') {
+            n.style.background = '#007aff';
             n.style.color = '#fff';
         }
         document.body.appendChild(n);
+        // Stagger multiple toasts by offsetting new ones downwards to avoid overlap
+        const existing = Array.from(document.querySelectorAll('.gt-notification'));
+        existing.forEach((el, idx) => { el.style.top = `${16 + idx * 56}px`; });
         setTimeout(() => { n.style.opacity = '0'; setTimeout(() => n.remove(), 300); }, 2500);
     } catch (e) { /* ignore */ }
 }
@@ -105,8 +112,11 @@ function updateBudgetUI(todayTotal) {
     if (typeof todayTotal === 'number') {
         total = todayTotal;
     } else {
+        const todayKey = getTodayString();
         total = state.entries.reduce((s, e) => {
-            if (!isTodayEntry(e)) return s;
+            try {
+                if (getEntryDate(e) !== todayKey) return s;
+            } catch (ex) { return s; }
             const c = parseFloat(e.calories);
             return s + (isNaN(c) ? 0 : c);
         }, 0);
@@ -115,14 +125,69 @@ function updateBudgetUI(todayTotal) {
     dbg(`Budget UI: total=${total} budget=${budget} pct=${pct}%`, 'debug');
     const fill = document.getElementById('budget-bar-fill');
     const vals = document.getElementById('budget-values');
-    if (fill) fill.style.width = pct + '%';
     if (vals) vals.textContent = `${Math.round(total)} / ${budget} kcal`;
-    // Color warning if over budget
+
+    // Compute macro calories for today's entries
+    const todayKey = getTodayString();
+    const macros = state.entries.reduce((acc, e) => {
+        try {
+            if (getEntryDate(e) !== todayKey) return acc;
+        } catch (ex) { return acc; }
+        const p = parseFloat(e.protein) || 0;
+        const c = parseFloat(e.carbs) || 0;
+        const f = parseFloat(e.fat) || 0;
+        acc.protein += p;
+        acc.carbs += c;
+        acc.fat += f;
+        return acc;
+    }, { protein: 0, carbs: 0, fat: 0 });
+
+    const calFromProtein = macros.protein * 4;
+    const calFromCarbs = macros.carbs * 4;
+    const calFromFat = macros.fat * 9;
+    const totalMacroCalories = calFromProtein + calFromCarbs + calFromFat;
+
+    // Set outer fill width relative to budget and ensure solid colored segments
     if (fill) {
-        if (total > budget) {
-            fill.style.background = 'linear-gradient(90deg, #ff3b30 0%, #ff7b7b 100%)';
+        fill.style.width = pct + '%';
+        // Remove any gradient background on the fill so segments show clearly
+        fill.style.background = 'transparent';
+        fill.style.display = 'flex';
+        // Fill contains three child segments; compute widths inside the filled area
+        const segFat = document.getElementById('budget-seg-fat');
+        const segProtein = document.getElementById('budget-seg-protein');
+        const segCarbs = document.getElementById('budget-seg-carbs');
+
+        if (totalMacroCalories > 0) {
+            // Compute each segment as a fraction of the filled portion
+            const fracFat = calFromFat / totalMacroCalories;
+            const fracProtein = calFromProtein / totalMacroCalories;
+            const fracCarbs = calFromCarbs / totalMacroCalories;
+
+            // Set child element widths for tooltips (kept) and a min-visible width
+            if (segFat) { segFat.style.width = (fracFat * 100) + '%'; segFat.style.display = 'block'; segFat.style.minWidth = '2px'; segFat.title = `Fat: ${Math.round(macros.fat)} g (${Math.round(fracFat * 100)}%)`; }
+            if (segProtein) { segProtein.style.width = (fracProtein * 100) + '%'; segProtein.style.display = 'block'; segProtein.style.minWidth = '2px'; segProtein.title = `Protein: ${Math.round(macros.protein)} g (${Math.round(fracProtein * 100)}%)`; }
+            if (segCarbs) { segCarbs.style.width = (fracCarbs * 100) + '%'; segCarbs.style.display = 'block'; segCarbs.style.minWidth = '2px'; segCarbs.title = `Carbs: ${Math.round(macros.carbs)} g (${Math.round(fracCarbs * 100)}%)`; }
+
+            // Also set a deterministic linear-gradient background on the fill so segments are visible
+            const stop1 = Math.round(fracFat * 100);
+            const stop2 = Math.round((fracFat + fracProtein) * 100);
+            const colFat = '#ff3b30';
+            const colProtein = '#34c759';
+            const colCarbs = '#007aff';
+            fill.style.background = `linear-gradient(90deg, ${colFat} 0% ${stop1}%, ${colProtein} ${stop1}% ${stop2}%, ${colCarbs} ${stop2}% 100%)`;
         } else {
-            fill.style.background = 'linear-gradient(90deg, #34c759 0%, #ffd60a 60%, #ff3b30 100%)';
+            if (segFat) { segFat.style.width = '0%'; segFat.title = 'Fat: 0 g (0%)'; }
+            if (segProtein) { segProtein.style.width = '0%'; segProtein.title = 'Protein: 0 g (0%)'; }
+            if (segCarbs) { segCarbs.style.width = '0%'; segCarbs.title = 'Carbs: 0 g (0%)'; }
+            fill.style.background = 'transparent';
+        }
+
+        // If over budget visually indicate by adding subtle outline to fill
+        if (total > budget && budget > 0) {
+            fill.style.boxShadow = 'inset 0 0 0 2px rgba(255,59,48,0.12)';
+        } else {
+            fill.style.boxShadow = 'none';
         }
     }
 }
@@ -130,6 +195,10 @@ function updateBudgetUI(todayTotal) {
 // Main render entry used across the app. Kept minimal so it's safe to call
 // early in startup before other render helpers are defined.
 function render() {
+    // Ensure state.entries is an array (normalize possible malformed shapes)
+    try {
+        normalizeStateEntries();
+    } catch (e) { dbg(`normalizeStateEntries error: ${e && e.message}`, 'error'); }
     try {
         // Compute today's total only from entries that match the canonical today date
         const today = getTodayString();
@@ -169,9 +238,40 @@ function render() {
                 }
             } catch (e) { dbg(`render tracker list error: ${e && e.message ? e.message : String(e)}`, 'error', e); }
         }
+        // If analytics page is active, refresh charts to reflect latest entries
+        if (activePage && activePage.id === 'page-analytics' && typeof updateAnalytics === 'function') {
+            try { updateAnalytics(); } catch (e) { dbg(`updateAnalytics error: ${e && e.message}`, 'error'); }
+        }
     } catch (e) {
         try { dbg(`render error: ${e && e.message ? e.message : String(e)}`, 'error', e); } catch (eee) { /* ignore */ }
     }
+}
+
+// Normalize `state.entries` into an array if it was accidentally set to an object
+function normalizeStateEntries() {
+    if (Array.isArray(state.entries)) return;
+    if (!state.entries || typeof state.entries !== 'object') {
+        state.entries = [];
+        return;
+    }
+    // If it's a map of date => [entries], merge them
+    const keys = Object.keys(state.entries);
+    const looksLikeDateMap = keys.length > 0 && keys.every(k => /^\d{4}-\d{2}-\d{2}$/.test(k) && Array.isArray(state.entries[k]));
+    if (looksLikeDateMap) {
+        const merged = keys.sort().reduce((acc, k) => acc.concat(state.entries[k] || []), []);
+        state.entries = merged;
+        return;
+    }
+    // Otherwise try to flatten any array-like values
+    try {
+        const vals = keys.map(k => state.entries[k]).filter(v => Array.isArray(v)).flat();
+        if (Array.isArray(vals) && vals.length > 0) {
+            state.entries = vals;
+            return;
+        }
+    } catch (e) { /* ignore */ }
+    // Fallback: set to empty array
+    state.entries = [];
 }
 
 async function saveBudgetToRepo() {
@@ -211,7 +311,7 @@ async function saveBudgetToRepo() {
         if (res.ok) {
             const json = await res.json();
             setConfig('dailyBudget', budget);
-            showNotification('Budget saved to repo ✅');
+            showNotification('Budget saved to repo', 'write');
             dbg('Budget saved to GitHub', 'info');
         } else {
             const err = await res.json();
@@ -323,6 +423,11 @@ function buildEntryCard(entry, globalIndex, opts = {}) {
         d.style.background = 'rgba(0, 122, 255, 0.1)';
         d.style.borderLeft = '4px solid var(--primary)';
     }
+    // Track selection highlight for tracker mode as well
+    if (mode === 'tracker' && state.selectMode && state.selectedEntries.has(globalIndex)) {
+        d.style.background = 'rgba(0, 122, 255, 0.06)';
+        d.style.borderLeft = '4px solid var(--primary)';
+    }
 
     // Left column: food, time, macros
     const left = document.createElement('div');
@@ -366,7 +471,7 @@ function buildEntryCard(entry, globalIndex, opts = {}) {
         left.appendChild(m);
     }
 
-    // Checkbox (history select mode)
+    // Checkbox (history select mode OR tracker select mode)
     const checkboxWrapper = document.createElement('div');
     if (mode === 'history' && state.historySelectMode) {
         const cb = document.createElement('input');
@@ -376,6 +481,15 @@ function buildEntryCard(entry, globalIndex, opts = {}) {
         cb.style.height = '20px';
         cb.style.cursor = 'pointer';
         cb.onchange = () => toggleHistoryEntrySelection(globalIndex);
+        checkboxWrapper.appendChild(cb);
+    } else if (mode === 'tracker' && state.selectMode) {
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = state.selectedEntries.has(globalIndex);
+        cb.style.width = '20px';
+        cb.style.height = '20px';
+        cb.style.cursor = 'pointer';
+        cb.onchange = () => toggleEntrySelection(globalIndex);
         checkboxWrapper.appendChild(cb);
     }
 
@@ -388,6 +502,17 @@ function buildEntryCard(entry, globalIndex, opts = {}) {
     kcal.style.fontWeight = '700';
     kcal.textContent = `${Math.round(entry.calories || 0)} kcal`;
     topRight.appendChild(kcal);
+    // Optional Health Score badge (1-10)
+    if (entry.healthScore || entry.healthScore === 0) {
+        const score = document.createElement('div');
+        score.style.fontSize = '12px';
+        score.style.color = 'var(--text-secondary)';
+        score.style.padding = '4px 8px';
+        score.style.borderRadius = '8px';
+        score.style.background = 'rgba(0,0,0,0.03)';
+        score.textContent = `Score: ${Math.round(entry.healthScore)} / 10`;
+        topRight.appendChild(score);
+    }
 
     // Top row (checkbox + content + calories)
     const row = document.createElement('div');
@@ -396,7 +521,7 @@ function buildEntryCard(entry, globalIndex, opts = {}) {
     row.style.alignItems = 'center';
     row.style.width = '100%';
     row.style.justifyContent = 'space-between'; // push calories to the far right
-    if (mode === 'history' && state.historySelectMode) row.appendChild(checkboxWrapper);
+    if ((mode === 'history' && state.historySelectMode) || (mode === 'tracker' && state.selectMode)) row.appendChild(checkboxWrapper);
     row.appendChild(left);
     row.appendChild(topRight);
 
@@ -561,6 +686,7 @@ async function saveLogs() {
             dbg(`Logs successfully ${action} to ${logFile}`, 'info');
             dbg(`Final size: ${finalContent.length} bytes`, 'debug');
             alert(`Logs saved to ${logFile}!`);
+            try { showNotification('Logs saved to GitHub', 'write'); } catch (e) {}
         } else {
             const err = await res.json();
             dbg(`Failed to save logs: ${err.message}`, 'error', err);
@@ -627,6 +753,8 @@ function showPage(p) {
         if (dataFileEl) dataFileEl.innerText = `${getConfig('dataFolder')}/<YYYY-MM-DD>.json`;
         if (schemaEl) schemaEl.innerText = state.schema ? state.schema.displayName : 'Loading...';
     }
+    // Ensure the newly shown page renders its latest state immediately
+    try { render(); } catch (e) { dbg(`showPage render error: ${e && e.message ? e.message : String(e)}`, 'error'); }
 }
 
 function toggleLogs() {
@@ -699,6 +827,23 @@ open http://localhost:8000</pre>
 
 function renderFormFields() {
     if (!state.schema) return;
+
+    // Ensure runtime schema includes healthScore so the form shows it immediately
+    try {
+        if (!Array.isArray(state.schema.fields)) state.schema.fields = state.schema.fields || [];
+        if (!state.schema.fields.some(f => f.name === 'healthScore')) {
+            state.schema.fields.push({
+                name: 'healthScore',
+                type: 'number',
+                label: 'Health Score (1-10)',
+                required: false,
+                min: 1,
+                max: 10,
+                placeholder: 'Optional - 1 (poor) .. 10 (excellent)'
+            });
+            dbg('Runtime: injected healthScore into schema.fields', 'debug');
+        }
+    } catch (e) { dbg('Failed to inject runtime healthScore field: ' + (e && e.message), 'warn'); }
     
     const container = document.getElementById('form-container');
     if (!container) return;
@@ -739,6 +884,22 @@ function renderFormFields() {
                 if (field.default === opt) option.selected = true;
                 input.appendChild(option);
             });
+        } else if (field.name === 'healthScore') {
+            // Render healthScore as a dropdown (1-10)
+            input = document.createElement('select');
+            input.id = `field-${field.name}`;
+
+            const emptyOption = document.createElement('option');
+            emptyOption.value = '';
+            emptyOption.textContent = `Select ${field.label}`;
+            input.appendChild(emptyOption);
+
+            for (let i = (field.min || 1); i <= (field.max || 10); i++) {
+                const opt = document.createElement('option');
+                opt.value = String(i);
+                opt.textContent = String(i);
+                input.appendChild(opt);
+            }
         } else {
             input = document.createElement('input');
             input.type = field.type;
@@ -833,7 +994,38 @@ function renderFormFields() {
         }
         macroSection.appendChild(wrapper);
     });
-    
+
+    // Fallback: ensure healthScore input exists in the main form (not inside macros)
+    try {
+        if (!document.getElementById('field-healthScore')) {
+            const hsField = state.schema.fields.find(f => f.name === 'healthScore');
+            if (hsField) {
+                const fb = document.createElement('div');
+                fb.className = 'form-field';
+                fb.style.gridColumn = 'span 2';
+
+                const inp = document.createElement('select');
+                inp.id = 'field-healthScore';
+                const emptyOpt = document.createElement('option');
+                emptyOpt.value = '';
+                emptyOpt.textContent = hsField.label ? `Select ${hsField.label}` : 'Select Health Score';
+                inp.appendChild(emptyOpt);
+                const minV = hsField.min !== undefined ? hsField.min : 1;
+                const maxV = hsField.max !== undefined ? hsField.max : 10;
+                for (let i = minV; i <= maxV; i++) {
+                    const o = document.createElement('option');
+                    o.value = String(i);
+                    o.textContent = String(i);
+                    inp.appendChild(o);
+                }
+                inp.style.cssText = 'width:100%; padding:8px;';
+
+                fb.appendChild(inp);
+                container.appendChild(fb);
+            }
+        }
+    } catch (e) { /* ignore fallback errors */ }
+
     container.appendChild(macroSection);
     
     // Add the submit button - use form-field wrapper for proper grid alignment
@@ -1027,8 +1219,11 @@ async function fetchFromGit(onlyToday = false) {
                     try { decoded = atob(b64); dbg(`Today's file decoded preview: ${decoded.slice(0,200)}`, 'debug'); } catch (e) { dbg(`Failed to base64-decode today's file content: ${e.message}`, 'warn'); }
                     let arr = [];
                     try { arr = JSON.parse(decoded || ''); if (!Array.isArray(arr)) arr = []; } catch (e) { dbg(`Invalid JSON in ${filePath}: ${e.message}`, 'warn', decoded ? decoded.slice(0,200) : null); arr = []; }
+                    // Tag entries with source date so they are associated with the per-day file
+                    arr = arr.map(e => ({ ...(e || {}), _sourceDate: today }));
                     state.fileIndex[today] = j.sha;
                     state.entries = arr;
+                    try { showNotification(`Fetched ${arr.length} entries for ${today}`, 'read'); } catch (e) {}
                     render();
                     renderHistory();
                     dbg(`Loaded ${arr.length} entries from ${filePath}`, 'info');
@@ -1099,6 +1294,8 @@ async function fetchFromGit(onlyToday = false) {
                             let arr = [];
                             try { arr = JSON.parse(decoded || ''); if (!Array.isArray(arr)) arr = []; } catch (e) { dbg(`Invalid JSON in ${it.name}: ${e.message}`, 'warn', decoded ? decoded.slice(0,200) : null); arr = []; }
                             const dateStr = it.name.replace('.json', '');
+                            // Tag each entry with its source date
+                            arr = arr.map(e => ({ ...(e || {}), _sourceDate: dateStr }));
                             state.fileIndex[dateStr] = j.sha;
                             return arr;
                         } catch (e) {
@@ -1111,6 +1308,7 @@ async function fetchFromGit(onlyToday = false) {
                 }
 
                 state.entries = merged;
+                try { showNotification(`Fetched ${state.entries.length} entries from GitHub`, 'read'); } catch (e) {}
                 render();
                 renderHistory();
                 dbg(`Successfully loaded ${state.entries.length} entries from ${toFetch.length} files`, 'info');
@@ -1153,6 +1351,44 @@ async function fetchFromGit(onlyToday = false) {
     render();
     renderHistory();
     if (activeBtn) activeBtn.classList.remove('loading');
+}
+
+// Fetch a single per-day file from GitHub and merge into state.entries
+async function fetchDateFromGit(dateStr) {
+    try {
+        const token = localStorage.getItem('gt_token');
+        const repo = localStorage.getItem('gt_repo');
+        if (!token || !repo) {
+            dbg('fetchDateFromGit: missing credentials', 'warn');
+            return { status: 0, entries: null };
+        }
+        const dataFolder = getConfig('dataFolder') || 'data';
+        const filePath = `${dataFolder}/${dateStr}.json`;
+        const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+        dbg(`fetchDateFromGit: fetching ${filePath}`, 'info');
+        const res = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+        const status = res.status;
+        if (!res.ok) {
+            dbg(`fetchDateFromGit: ${filePath} fetch status ${status}`, status === 404 ? 'info' : 'warn');
+            return { status: status, entries: (status === 404 ? [] : null) };
+        }
+        const j = await res.json();
+        const b64 = j.content || '';
+        let decoded = '';
+        try { decoded = atob(b64); } catch (e) { dbg(`fetchDateFromGit decode error: ${e.message}`, 'error'); return false; }
+        let arr = [];
+        try { arr = JSON.parse(decoded || ''); if (!Array.isArray(arr)) arr = []; } catch (e) { dbg(`fetchDateFromGit JSON parse error: ${e.message}`, 'error'); arr = []; }
+        // Tag entries with their source date
+        arr = arr.map(e => ({ ...(e || {}), _sourceDate: dateStr }));
+        // Record file SHA but do not mutate global entries (analytics should not overwrite tracker data)
+        state.fileIndex = state.fileIndex || {};
+        state.fileIndex[dateStr] = j.sha;
+        dbg(`fetchDateFromGit: fetched ${arr.length} entries for ${dateStr} (returned, not merged)`, 'info');
+        return { status: 200, entries: arr };
+    } catch (e) {
+        dbg(`fetchDateFromGit error: ${e && e.message ? e.message : String(e)}`, 'error');
+        return { status: 0, entries: null };
+    }
 }
 
 // Load a local copy of the data file (useful when not using GitHub)
@@ -1220,6 +1456,7 @@ async function pushEntryForDate(dateStr, entry) {
             const resj = JSON.parse(putBody || '{}');
             state.fileIndex[dateStr] = resj.content?.sha;
             dbg(`Pushed entry to ${filePath} (SHA: ${resj.content?.sha?.substring?.(0,8) || 'unknown'})`, 'info');
+            try { showNotification(`Wrote entry to ${filePath}`, 'write'); } catch (e) {}
             return true;
         } else {
             let err = {};
@@ -1312,6 +1549,7 @@ async function pushEntriesByDate(entries, options = { mode: 'append' }) {
                 const resj = JSON.parse(putText || '{}');
                 state.fileIndex[dateStr] = resj.content?.sha;
                 dbg(`Imported ${groups[dateStr].length} into ${filePath} (SHA: ${resj.content?.sha?.substring?.(0,8) || 'unknown'})`, 'info');
+                try { showNotification(`Wrote ${groups[dateStr].length} entries to ${filePath}`, 'write'); } catch (e) {}
             } else {
                 let err = {};
                 try { err = JSON.parse(putText); } catch (e) { err = { message: putText }; }
@@ -1367,6 +1605,7 @@ async function pushDateFile(dateStr, finalArray) {
             const resj = JSON.parse(putText || '{}');
             state.fileIndex[dateStr] = resj.content?.sha;
             dbg(`Wrote ${filePath} (SHA: ${resj.content?.sha?.substring?.(0,8) || 'unknown'})`, 'info');
+            try { showNotification(`Saved ${filePath}`, 'write'); } catch (e) {}
             return true;
         } else {
             let err = {};
@@ -1421,6 +1660,7 @@ async function deleteDateFile(dateStr) {
         if (delRes.ok) {
             delete state.fileIndex[dateStr];
             dbg(`Deleted ${filePath}`, 'info');
+            try { showNotification(`Deleted ${filePath}`, 'delete'); } catch (e) {}
             return true;
         } else {
             let err = {};
@@ -1439,7 +1679,9 @@ async function deleteDateFile(dateStr) {
 // filters entries to show only today's entries on the tracker page.
 
 async function deleteEntry(index) {
-    if (!confirm('Delete this entry?')) return;
+    try { showNotification('Opening delete confirmation...', 'read'); } catch (e) {}
+    const proceed = await showConfirm('Delete this entry?');
+    if (!proceed) return;
 
     // Compute the removed entry and remaining entries for its date WITHOUT mutating state yet.
     const removed = state.entries[index];
@@ -1476,6 +1718,8 @@ async function deleteEntry(index) {
                 state.hasUnsavedChanges = false;
                 render();
                 renderHistory();
+                try { showNotification(`Deleted entry${removed && removed.food ? ': ' + removed.food : ''}`, 'delete'); } catch (e) {}
+                closeConfirm();
             } else {
                 dbg('Delete aborted: remote write/delete failed; local state preserved', 'error');
                 alert('Failed to persist delete to repo. Check logs.');
@@ -1488,6 +1732,8 @@ async function deleteEntry(index) {
                 state.entries.splice(index, 1);
                 render();
                 renderHistory();
+                try { showNotification(`Deleted entry${removed && removed.food ? ': ' + removed.food : ''}`, 'delete'); } catch (e) {}
+                closeConfirm();
             } else {
                 dbg('Full replace failed; local state preserved', 'error');
                 alert('Failed to persist delete to repo. Check logs.');
@@ -1511,6 +1757,79 @@ function toggleMacros(index) {
         macrosDiv.style.display = 'none';
         btn.textContent = '▶';
     }
+}
+
+// Application-level confirm dialog utilities
+function showConfirm(message, title = 'Confirm', details = null) {
+    return new Promise((resolve) => {
+        try {
+            const modal = document.getElementById('app-confirm-modal');
+            const msgEl = document.getElementById('confirm-message');
+            const detailsEl = document.getElementById('confirm-details');
+            const titleEl = document.getElementById('confirm-title');
+            const yesBtn = document.getElementById('confirm-yes');
+            const noBtn = document.getElementById('confirm-no');
+            if (!modal || !msgEl || !yesBtn || !noBtn) {
+                // Fallback to browser confirm if modal missing
+                resolve(window.confirm(message));
+                return;
+            }
+            titleEl.textContent = title;
+            msgEl.textContent = message;
+            if (detailsEl) {
+                if (details) {
+                    detailsEl.innerHTML = details;
+                    detailsEl.style.display = 'block';
+                } else {
+                    detailsEl.innerHTML = '';
+                    detailsEl.style.display = 'none';
+                }
+            }
+            modal.style.display = 'flex';
+            // Reset button states
+            yesBtn.disabled = false; yesBtn.textContent = 'Delete';
+            noBtn.disabled = false;
+
+            const cleanup = () => {
+                yesBtn.removeEventListener('click', onYes);
+                noBtn.removeEventListener('click', onNo);
+            };
+
+            const onYes = () => {
+                // Keep modal visible and indicate pending state; caller will call closeConfirm()
+                yesBtn.disabled = true;
+                noBtn.disabled = true;
+                yesBtn.textContent = 'Deleting...';
+                cleanup();
+                resolve(true);
+            };
+
+            const onNo = () => {
+                cleanup();
+                modal.style.display = 'none';
+                if (detailsEl) { detailsEl.innerHTML = ''; detailsEl.style.display = 'none'; }
+                resolve(false);
+            };
+
+            yesBtn.addEventListener('click', onYes);
+            noBtn.addEventListener('click', onNo);
+        } catch (e) {
+            resolve(window.confirm(message));
+        }
+    });
+}
+
+function closeConfirm() {
+    try {
+        const modal = document.getElementById('app-confirm-modal');
+        const yesBtn = document.getElementById('confirm-yes');
+        const noBtn = document.getElementById('confirm-no');
+        const detailsEl = document.getElementById('confirm-details');
+        if (yesBtn) { yesBtn.disabled = false; yesBtn.textContent = 'Delete'; }
+        if (noBtn) { noBtn.disabled = false; }
+        if (detailsEl) { detailsEl.innerHTML = ''; detailsEl.style.display = 'none'; }
+        if (modal) modal.style.display = 'none';
+    } catch (e) { /* ignore */ }
 }
 
 function toggleSelectMode() {
@@ -1547,11 +1866,19 @@ function toggleEntrySelection(index) {
 }
 
 function selectAll() {
+    // If on the tracker page, only select today's visible entries.
+    const activePage = document.querySelector('.page.active');
     if (state.selectedEntries.size === state.entries.length) {
         // All selected, deselect all
         state.selectedEntries.clear();
+    } else if (activePage && activePage.id === 'page-tracker') {
+        // Select only today's entries (visible in tracker)
+        const today = getTodayString();
+        state.entries.forEach((entry, index) => {
+            if (getEntryDate(entry) === today) state.selectedEntries.add(index);
+        });
     } else {
-        // Select all
+        // Select all entries across all dates
         state.entries.forEach((entry, index) => {
             state.selectedEntries.add(index);
         });
@@ -1570,16 +1897,37 @@ async function bulkDelete() {
         alert('No entries selected.');
         return;
     }
-    
-    if (!confirm(`Delete ${state.selectedEntries.size} selected entries?`)) {
-        return;
-    }
-    
     // Convert to array and sort ascending to compute removals
     const indices = Array.from(state.selectedEntries).sort((a, b) => a - b);
+    const toRemove = new Set(indices);
+
+    // Build a details preview grouped by date for the confirm modal
+    const previewByDate = {};
+    for (const i of indices) {
+        const e = state.entries[i];
+        const d = getEntryDate(e) || 'Unknown';
+        if (!previewByDate[d]) previewByDate[d] = [];
+        previewByDate[d].push(e);
+    }
+    let detailsHtml = '<div style="display:flex; flex-direction:column; gap:8px;">';
+    for (const d of Object.keys(previewByDate).sort().slice(0,50)) {
+        const items = previewByDate[d];
+        detailsHtml += `<div style="font-weight:600; margin-bottom:4px;">${d} (${items.length})</div><ul style="margin:0 0 8px 16px; padding:0; list-style:disc; max-height:120px; overflow:auto;">`;
+        for (let j = 0; j < Math.min(items.length, 10); j++) {
+            const f = items[j].food || '(no food)';
+            detailsHtml += `<li>${escapeHtml(String(f))}</li>`;
+        }
+        if (items.length > 10) detailsHtml += `<li>...and ${items.length - 10} more</li>`;
+        detailsHtml += '</ul>';
+    }
+    detailsHtml += '</div>';
+
+    const proceed = await showConfirm(`Delete ${state.selectedEntries.size} selected entries?`, 'Confirm Delete', detailsHtml);
+    if (!proceed) {
+        return;
+    }
 
     // Compute affected dates and remaining arrays WITHOUT mutating local state
-    const toRemove = new Set(indices);
     const affectedDates = new Set();
     let undatedRemoved = 0;
     const remainingByDate = {};
@@ -1630,9 +1978,11 @@ async function bulkDelete() {
         updateSelectedCount();
         render();
         renderHistory();
+        try { closeConfirm(); } catch (e) { /* ignore */ }
         dbg(`Bulk deleted ${indices.length} entries`, 'info');
     } catch (e) {
         dbg(`Bulk delete auto-save failed: ${e.message}`, 'error');
+        try { closeConfirm(); } catch (ee) { /* ignore */ }
         alert('Failed to persist bulk delete. Check logs.');
         state.hasUnsavedChanges = false;
     }
@@ -1652,6 +2002,8 @@ function exportSelectedToCsv() {
     
     // Build CSV
     const headers = ['Date', 'Time', 'Food', 'Calories', 'Protein (g)', 'Carbs (g)', 'Fat (g)'];
+    // Add optional Health Score column
+    headers.push('Health Score (1-10)');
     let csv = headers.join(',') + '\n';
     
     selectedData.forEach(entry => {
@@ -1664,6 +2016,7 @@ function exportSelectedToCsv() {
             entry.carbs || '',
             entry.fat || ''
         ];
+        row.push(entry.healthScore || '');
         csv += row.join(',') + '\n';
     });
     
@@ -1738,14 +2091,51 @@ function ensureHistoryPrefetchIfNeeded() {
                 if (!state.historyPrefetchAttempts.has(key)) {
                     state.historyPrefetchAttempts.add(key);
                     state.historyFetchInProgress = true;
-                    dbg(`History requested dates [${targets.join(',')}] not loaded; fetching full data folder`, 'info');
-                    fetchFromGit(false).then(() => {
-                        state.historyFetchInProgress = false;
-                        renderHistory();
-                    }).catch(err => {
-                        state.historyFetchInProgress = false;
-                        dbg(`Failed to fetch full data folder for history: ${err && err.message ? err.message : String(err)}`, 'error');
-                    });
+                    // If only one date requested, fetch that single date file instead of the whole folder
+                    if (targets.length === 1) {
+                        const dateToFetch = targets[0];
+                        dbg(`History requested date ${dateToFetch} not loaded; fetching single date file`, 'info');
+                        fetchDateFromGit(dateToFetch).then(res => {
+                            state.historyFetchInProgress = false;
+                            if (res && res.status === 200 && Array.isArray(res.entries)) {
+                                // Merge entries for this date (avoid duplicates)
+                                const existingKeys = new Set(state.entries.map(e => JSON.stringify(e)));
+                                res.entries.forEach(en => { if (!existingKeys.has(JSON.stringify(en))) state.entries.push(en); });
+                                renderHistory();
+                            } else if (res && res.status === 404) {
+                                dbg(`History: ${dateToFetch} not found on GitHub (404).`, 'info');
+                                renderHistory();
+                            } else {
+                                dbg(`History single-date fetch returned status=${res && res.status}`, 'warn');
+                                // fallback to full folder fetch once
+                                if (!state.historyFetchFallbackAttempted) {
+                                    state.historyFetchFallbackAttempted = true;
+                                    dbg('History: falling back to full-folder fetch after single-date fetch failure', 'info');
+                                    fetchFromGit(false).then(() => { renderHistory(); }).catch(err => dbg(`Failed to fetch full data folder for history fallback: ${err && err.message ? err.message : String(err)}`, 'error'));
+                                } else {
+                                    renderHistory();
+                                }
+                            }
+                        }).catch(err => {
+                            state.historyFetchInProgress = false;
+                            dbg(`Failed to fetch single date file for history: ${err && err.message ? err.message : String(err)}`, 'error');
+                            if (!state.historyFetchFallbackAttempted) {
+                                state.historyFetchFallbackAttempted = true;
+                                fetchFromGit(false).then(() => { renderHistory(); }).catch(err2 => dbg(`Failed fallback full-folder fetch: ${err2 && err2.message ? err2.message : String(err2)}`, 'error'));
+                            } else {
+                                renderHistory();
+                            }
+                        });
+                    } else {
+                        dbg(`History requested dates [${targets.join(',')}] not loaded; fetching full data folder`, 'info');
+                        fetchFromGit(false).then(() => {
+                            state.historyFetchInProgress = false;
+                            renderHistory();
+                        }).catch(err => {
+                            state.historyFetchInProgress = false;
+                            dbg(`Failed to fetch full data folder for history: ${err && err.message ? err.message : String(err)}`, 'error');
+                        });
+                    }
                     return true; // fetch kicked off
                 } else {
                     dbg(`Already attempted prefetch for [${key}] — skipping additional fetch to avoid loop`, 'warn');
@@ -1755,36 +2145,6 @@ function ensureHistoryPrefetchIfNeeded() {
     } catch (e) { dbg(`ensureHistoryPrefetchIfNeeded error: ${e && e.message ? e.message : String(e)}`, 'error'); }
     return false;
 }
-
-function computeFilteredEntries() {
-    const foodFilter = document.getElementById('filter-food')?.value.toLowerCase();
-    dbg(`computeFilteredEntries: totalEntries=${state.entries.length} dateRangeStart=${state.dateRangeStart} dateRangeEnd=${state.dateRangeEnd} foodFilter=${foodFilter || 'none'}`, 'debug');
-
-    let filtered = state.entries.slice();
-
-    if (state.dateRangeStart && state.dateRangeEnd) {
-        if (state.dateRangeStart === state.dateRangeEnd) {
-            filtered = filtered.filter(e => getEntryDate(e) === state.dateRangeStart);
-        } else {
-            filtered = filtered.filter(e => {
-                const ed = getEntryDate(e);
-                return ed && ed >= state.dateRangeStart && ed <= state.dateRangeEnd;
-            });
-        }
-    }
-
-    if (foodFilter) filtered = filtered.filter(e => e.food?.toLowerCase().includes(foodFilter));
-
-    // newest-first
-    filtered.sort((a, b) => {
-        const timeA = new Date(a.timestamp || a.date).getTime();
-        const timeB = new Date(b.timestamp || b.date).getTime();
-        return timeB - timeA;
-    });
-
-    return filtered;
-}
-
 function buildHistoryStats(filtered) {
     try {
         document.getElementById('history-total-entries').innerText = filtered.length;
@@ -1968,6 +2328,35 @@ function groupByDate(entries) {
     return map;
 }
 
+function computeFilteredEntries() {
+    const foodFilter = document.getElementById('filter-food')?.value.toLowerCase();
+    dbg(`computeFilteredEntries: totalEntries=${Array.isArray(state.entries) ? state.entries.length : 0} dateRangeStart=${state.dateRangeStart} dateRangeEnd=${state.dateRangeEnd} foodFilter=${foodFilter || 'none'}`, 'debug');
+
+    let filtered = Array.isArray(state.entries) ? state.entries.slice() : [];
+
+    if (state.dateRangeStart && state.dateRangeEnd) {
+        if (state.dateRangeStart === state.dateRangeEnd) {
+            filtered = filtered.filter(e => getEntryDate(e) === state.dateRangeStart);
+        } else {
+            filtered = filtered.filter(e => {
+                const ed = getEntryDate(e);
+                return ed && ed >= state.dateRangeStart && ed <= state.dateRangeEnd;
+            });
+        }
+    }
+
+    if (foodFilter) filtered = filtered.filter(e => e.food?.toLowerCase().includes(foodFilter));
+
+    // newest-first
+    filtered.sort((a, b) => {
+        const timeA = new Date(a.timestamp || a.date).getTime();
+        const timeB = new Date(b.timestamp || b.date).getTime();
+        return timeB - timeA;
+    });
+
+    return filtered;
+}
+
 // Helper: return canonical YYYY-MM-DD date for an entry (prefer `timestamp`, fall back to `date`)
 function getEntryDate(entry) {
     if (!entry) return null;
@@ -1980,6 +2369,8 @@ function getEntryDate(entry) {
             if (!isNaN(d2.getTime())) return formatDateLocal(d2);
         } catch (e) { /* ignore */ }
     }
+    // Prefer a source-provided date (e.g., filename) when present
+    if (entry._sourceDate && typeof entry._sourceDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(entry._sourceDate)) return entry._sourceDate;
     // Finally, fall back to timestamp-derived local date.
     if (entry.timestamp) {
         try {
@@ -1988,6 +2379,16 @@ function getEntryDate(entry) {
         } catch (e) { /* ignore */ }
     }
     return null;
+}
+
+// Helper: returns true if an entry corresponds to today's canonical date
+function isTodayEntry(entry) {
+    try {
+        const d = getEntryDate(entry);
+        return d === getTodayString();
+    } catch (e) {
+        return false;
+    }
 }
 
 // Helper: format a Date object as local YYYY-MM-DD string
@@ -2001,6 +2402,16 @@ function formatDateLocal(d) {
     } catch (e) {
         return null;
     }
+}
+
+// Escape HTML for safe insertion into modal details
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 function addDaysToDateString(dateStr, days) {
@@ -2172,30 +2583,88 @@ function updateHistorySelectedCount() {
     if (countEl) countEl.textContent = state.historySelectedEntries.size;
 }
 
-function historyBulkDelete() {
+async function historyBulkDelete() {
     if (state.historySelectedEntries.size === 0) {
         alert('No entries selected.');
         return;
     }
-    
-    if (!confirm(`Delete ${state.historySelectedEntries.size} selected entries?`)) {
+
+    const indices = Array.from(state.historySelectedEntries).sort((a, b) => a - b);
+    const toRemove = new Set(indices);
+
+    // Determine which dates are affected by the selection and build preview
+    const affectedDates = new Set();
+    const previewByDate = {};
+    state.entries.forEach((e, i) => {
+        if (toRemove.has(i)) {
+            const d = getEntryDate(e) || getTodayString();
+            affectedDates.add(d);
+            if (!previewByDate[d]) previewByDate[d] = [];
+            previewByDate[d].push(e);
+        }
+    });
+
+    let detailsHtml = '<div style="display:flex; flex-direction:column; gap:8px;">';
+    for (const d of Object.keys(previewByDate).sort()) {
+        const items = previewByDate[d];
+        detailsHtml += `<div style="font-weight:600; margin-bottom:4px;">${d} (${items.length})</div><ul style="margin:0 0 8px 16px; padding:0; list-style:disc; max-height:120px; overflow:auto;">`;
+        for (let j = 0; j < Math.min(items.length, 10); j++) {
+            detailsHtml += `<li>${escapeHtml(String(items[j].food || '(no food)'))}</li>`;
+        }
+        if (items.length > 10) detailsHtml += `<li>...and ${items.length - 10} more</li>`;
+        detailsHtml += '</ul>';
+    }
+    detailsHtml += '</div>';
+
+    const proceed = await showConfirm(`Delete ${state.historySelectedEntries.size} selected entries?`, 'Confirm Delete', detailsHtml);
+    if (!proceed) return;
+
+    if (affectedDates.size === 0) {
+        // Nothing to do
+        try { closeConfirm(); } catch (e) { /* ignore */ }
         return;
     }
-    
-    const indices = Array.from(state.historySelectedEntries).sort((a, b) => b - a);
-    indices.forEach(index => {
-        state.entries.splice(index, 1);
-    });
-    
-    state.historySelectedEntries.clear();
+
     state.hasUnsavedChanges = true;
-    updateHistorySelectedCount();
-    render();
-    renderHistory();
-    
-    dbg(`Bulk deleted ${indices.length} entries from history`, 'info');
-    try { autoSave(); } catch (e) { dbg(`Auto-save error: ${e.message}`, 'error'); }
-    toggleHistorySelectMode();
+    try {
+        // For each affected date, compute remaining entries for that date and persist only that date
+        for (const dateStr of Array.from(affectedDates)) {
+            const remainingForDate = state.entries.filter((e, i) => {
+                const d = getEntryDate(e) || getTodayString();
+                if (d !== dateStr) return true; // keep entries for other dates
+                return !toRemove.has(i);
+            }).filter(e => getEntryDate(e) === dateStr);
+
+            if (!remainingForDate || remainingForDate.length === 0) {
+                // No remaining entries for this specific date -> delete date file
+                dbg(`historyBulkDelete: deleting remote file for ${dateStr} (no remaining entries)`, 'info');
+                const ok = await deleteDateFile(dateStr);
+                if (!ok) throw new Error(`Failed to delete ${dateStr}`);
+            } else {
+                const ok = await pushDateFile(dateStr, remainingForDate);
+                if (!ok) throw new Error(`Failed to write ${dateStr}`);
+            }
+        }
+
+        // After successful remote writes for affected dates, apply local removals
+        const remaining = state.entries.filter((e, i) => !toRemove.has(i));
+        state.entries = remaining;
+        state.historySelectedEntries.clear();
+        state.hasUnsavedChanges = false;
+        updateHistorySelectedCount();
+        render();
+        renderHistory();
+
+        try { closeConfirm(); } catch (e) { /* ignore */ }
+        dbg(`Bulk deleted ${toRemove.size} entries from history`, 'info');
+        try { autoSave(); } catch (e) { dbg(`Auto-save error: ${e.message}`, 'error'); }
+        toggleHistorySelectMode();
+    } catch (e) {
+        dbg(`historyBulkDelete persistence error: ${e && e.message}`, 'error');
+        try { closeConfirm(); } catch (ee) { /* ignore */ }
+        alert('Failed to persist history bulk delete. Check logs.');
+        state.hasUnsavedChanges = false;
+    }
 }
 
 function historyExportSelectedToCsv() {
@@ -2208,6 +2677,8 @@ function historyExportSelectedToCsv() {
     const selectedData = indices.map(i => state.entries[i]);
     
     const headers = ['Date', 'Time', 'Food', 'Calories', 'Protein (g)', 'Carbs (g)', 'Fat (g)'];
+    // Add optional Health Score column
+    headers.push('Health Score (1-10)');
     let csv = headers.join(',') + '\n';
     
     selectedData.forEach(entry => {
@@ -2220,6 +2691,7 @@ function historyExportSelectedToCsv() {
             entry.carbs || '',
             entry.fat || ''
         ];
+        row.push(entry.healthScore || '');
         csv += row.join(',') + '\n';
     });
     
@@ -2244,17 +2716,31 @@ function editEntry(index) {
         { name: 'protein', label: 'Protein (g)', type: 'number' },
         { name: 'carbs', label: 'Carbs (g)', type: 'number' },
         { name: 'fat', label: 'Fat (g)', type: 'number' },
+        { name: 'healthScore', label: 'Health Score (1-10)', type: 'number' },
         { name: 'date', label: 'Date', type: 'date' }
     ];
     
     fields.forEach(field => {
-        const input = document.createElement('input');
-        input.type = field.type;
-        input.id = `edit-${field.name}-${index}`;
-        input.value = entry[field.name] || '';
-        input.placeholder = field.label;
-        input.style.cssText = 'padding: 10px; border: 1px solid var(--border); border-radius: 8px;';
-        editForm.appendChild(input);
+            let input;
+            if (field.name === 'healthScore') {
+                input = document.createElement('select');
+                input.id = `edit-${field.name}-${index}`;
+                input.style.cssText = 'padding: 10px; border: 1px solid var(--border); border-radius: 8px;';
+                const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'Score'; input.appendChild(empty);
+                for (let s = 1; s <= 10; s++) {
+                    const o = document.createElement('option'); o.value = String(s); o.textContent = String(s);
+                    if (entry[field.name] !== undefined && parseInt(entry[field.name], 10) === s) o.selected = true;
+                    input.appendChild(o);
+                }
+            } else {
+                input = document.createElement('input');
+                input.type = field.type;
+                input.id = `edit-${field.name}-${index}`;
+                input.value = entry[field.name] || '';
+                input.placeholder = field.label;
+                input.style.cssText = 'padding: 10px; border: 1px solid var(--border); border-radius: 8px;';
+            }
+            editForm.appendChild(input);
     });
     
     // Add time dropdown
@@ -2303,6 +2789,9 @@ function saveEdit(index) {
     entry.protein = parseFloat(document.getElementById(`edit-protein-${index}`).value) || undefined;
     entry.carbs = parseFloat(document.getElementById(`edit-carbs-${index}`).value) || undefined;
     entry.fat = parseFloat(document.getElementById(`edit-fat-${index}`).value) || undefined;
+    // Health score is optional; keep undefined if not a valid number
+    const hsVal = parseInt(document.getElementById(`edit-healthScore-${index}`).value, 10);
+    entry.healthScore = (!isNaN(hsVal) ? hsVal : undefined);
     entry.date = document.getElementById(`edit-date-${index}`).value;
     entry.time = document.getElementById(`edit-time-${index}`).value;
     
@@ -2321,7 +2810,9 @@ function saveEdit(index) {
 }
 
 async function deleteEntryGlobal(index) {
-    if (!confirm('Delete this entry?')) return;
+    try { showNotification('Opening delete confirmation...', 'read'); } catch (e) {}
+    const proceed = await showConfirm('Delete this entry?');
+    if (!proceed) return;
     const removed = state.entries.splice(index, 1)[0];
     state.hasUnsavedChanges = true;
     render();
@@ -2337,6 +2828,8 @@ async function deleteEntryGlobal(index) {
         } else {
             await pushEntriesByDate(state.entries, { mode: 'replace' });
         }
+        try { showNotification(`Deleted entry${removed && removed.food ? ': ' + removed.food : ''}`, 'delete'); } catch (e) {}
+        closeConfirm();
         state.hasUnsavedChanges = false;
     } catch (e) {
         dbg(`Auto-save delete failed: ${e.message}`, 'error');
@@ -2383,17 +2876,80 @@ function animateProgress() {
     }, 50);
 }
 
-function renderAnalytics(date) {
-    if (!state.entries.length) {
-        dbg('No data available for analytics', 'warn');
-        return;
+async function renderAnalytics(date) {
+    const dateStr = date || (new Date().toISOString().split('T')[0]);
+    // Determine initial entries source (temporary per-date or global state)
+    let entriesForAnalytics = (state._tempEntriesForAnalytics && state._tempEntriesForAnalytics.date === dateStr) ? state._tempEntriesForAnalytics.entries : state.entries;
+
+    // Ensure attempt tracking exists
+    state._analytics_dateAttempts = state._analytics_dateAttempts || new Set();
+
+    // If no entries or the requested date isn't present locally, try fetching the single date first
+    const hasDateLocally = Array.isArray(entriesForAnalytics) && entriesForAnalytics.some(e => getEntryDate(e) === dateStr);
+    if (!hasDateLocally) {
+        if (!state._analytics_dateAttempts.has(dateStr)) {
+            state._analytics_dateAttempts.add(dateStr);
+            dbg(`Analytics: attempting to fetch only ${dateStr} and retrying`, 'info');
+            try {
+                const res = await fetchDateFromGit(dateStr);
+                if (res && res.status === 200 && Array.isArray(res.entries)) {
+                    entriesForAnalytics = res.entries;
+                    // Cache temporarily for this analytics render
+                    state._tempEntriesForAnalytics = { date: dateStr, entries: res.entries };
+                } else if (res && res.status === 404) {
+                    dbg(`Analytics: ${dateStr} not found on GitHub (404). Showing empty history view.`, 'info');
+                    entriesForAnalytics = [];
+                } else {
+                    dbg(`Analytics: fetchDateFromGit returned no data for ${dateStr} (status=${res && res.status})`, 'warn');
+                    // Fallback to a single full-folder fetch once
+                    if (!state._analytics_fetchAttempted) {
+                        state._analytics_fetchAttempted = true;
+                        dbg('Analytics: falling back to full-folder fetch due to fetchDateFromGit error', 'info');
+                        await fetchFromGit(false).catch(err => dbg(`Analytics fetchFromGit failed: ${err && err.message}`, 'error'));
+                        entriesForAnalytics = state.entries || [];
+                    } else {
+                        entriesForAnalytics = [];
+                    }
+                }
+            } catch (err) {
+                dbg(`Analytics: fetchDateFromGit failed: ${err && err.message}`, 'error');
+                // Fallback to folder fetch once
+                if (!state._analytics_fetchAttempted) {
+                    state._analytics_fetchAttempted = true;
+                    await fetchFromGit(false).catch(err => dbg(`Analytics fetchFromGit failed: ${err && err.message}`, 'error'));
+                    entriesForAnalytics = state.entries || [];
+                } else {
+                    entriesForAnalytics = [];
+                }
+            }
+        } else {
+            // Already attempted; treat as no data
+            entriesForAnalytics = [];
+        }
     }
-    
-    // Filter entries for selected date
-    const filtered = state.entries.filter(e => e.date === date);
-    
+
+    if (!Array.isArray(entriesForAnalytics)) entriesForAnalytics = [];
+
+    try {
+        const uniqueDates = Array.from(new Set(entriesForAnalytics.map(e => getEntryDate(e)).filter(Boolean))).sort();
+        dbg(`Analytics requested date=${dateStr} totalEntries=${entriesForAnalytics.length} uniqueDates=${uniqueDates.join(',')}`, 'debug');
+    } catch (e) { dbg(`Analytics diagnostic error: ${e && e.message}`, 'warn'); }
+
+    const filtered = entriesForAnalytics.filter(e => getEntryDate(e) === dateStr);
+
     if (filtered.length === 0) {
         dbg(`No entries found for ${date}`, 'warn');
+        // If we have any entries at all, pick the most recent date and render that instead
+        if (Array.isArray(state.entries) && state.entries.length > 0) {
+            const dates = Array.from(new Set(state.entries.map(e => e.date).filter(d => !!d))).sort();
+            const latest = dates.length > 0 ? dates[dates.length - 1] : null;
+            if (latest && latest !== date && state._analytics_autoRedirectedTo !== latest) {
+                state._analytics_autoRedirectedTo = latest;
+                dbg(`Analytics: switching to latest available date ${latest}`, 'info');
+                renderAnalytics(latest);
+                return;
+            }
+        }
         // Show empty state in charts
         Object.values(charts).forEach(chart => chart.destroy());
         charts = {};
@@ -2453,40 +3009,94 @@ function renderAnalytics(date) {
     
     // Only show macro chart if we have macro data
     if (totalProtein > 0 || totalCarbs > 0 || totalFat > 0) {
-        charts.macro = new Chart(document.getElementById('chart-macro-distribution'), {
-            type: 'doughnut',
-            data: {
-                labels: ['Protein', 'Carbs', 'Fat'],
-                datasets: [{
-                    data: [totalProtein, totalCarbs, totalFat],
-                    backgroundColor: ['#007aff', '#5856d6', '#34c759']
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: true,
-                plugins: {
-                    legend: {
-                        position: 'bottom'
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const value = context.parsed || 0;
-                                const dataArr = context.dataset.data || [];
-                                const total = dataArr.reduce((s, v) => s + (parseFloat(v) || 0), 0);
-                                const pct = total > 0 ? Math.round((value / total) * 100) : 0;
-                                return `${context.label}: ${Math.round(value)}g (${pct}%)`;
+        try {
+            charts.macro = new Chart(document.getElementById('chart-macro-distribution'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Protein', 'Carbs', 'Fat'],
+                    datasets: [{
+                        data: [totalProtein, totalCarbs, totalFat],
+                        backgroundColor: ['#007aff', '#5856d6', '#34c759']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                // Generate labels that include grams and percentage
+                                generateLabels: function(chart) {
+                                    const data = (chart.data.datasets && chart.data.datasets[0] && chart.data.datasets[0].data) || [];
+                                    const labels = chart.data.labels || [];
+                                    const total = data.reduce((s, v) => s + (parseFloat(v) || 0), 0) || 1;
+                                    return labels.map((lab, i) => {
+                                        const value = parseFloat(data[i]) || 0;
+                                        const pct = Math.round((value / total) * 100);
+                                        return {
+                                            text: `${lab}: ${Math.round(value)}g (${pct}%)`,
+                                            fillStyle: (chart.data.datasets[0].backgroundColor || [])[i] || '#000',
+                                            hidden: false,
+                                            index: i
+                                        };
+                                    });
+                                }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const value = context.parsed || 0;
+                                    const dataArr = context.dataset.data || [];
+                                    const total = dataArr.reduce((s, v) => s + (parseFloat(v) || 0), 0);
+                                    const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+                                    return `${context.label}: ${Math.round(value)}g (${pct}%)`;
+                                }
                             }
                         }
-                    },
-                    // Optional: draw total in center for quick glance
-                    beforeDraw: function(chart) {
-                        // noop placeholder for Chart.js v4 plugin hook if needed later
                     }
                 }
-            }
-        });
+            });
+        } catch (e) {
+            dbg(`Macro chart render error: ${e && e.message}`, 'error', e);
+            // Fallback: draw placeholder and append textual legend
+            try {
+                const macroCanvas = document.getElementById('chart-macro-distribution');
+                if (macroCanvas && macroCanvas.getContext) {
+                    const ctx = macroCanvas.getContext('2d');
+                    ctx.clearRect(0, 0, macroCanvas.width, macroCanvas.height);
+                    ctx.font = '14px -apple-system, sans-serif';
+                    ctx.fillStyle = '#8e8e93';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('Macro chart unavailable', macroCanvas.width / 2, macroCanvas.height / 2 - 10);
+                }
+                const container = document.getElementById('chart-macro-distribution')?.parentElement;
+                if (container) {
+                    // Remove existing fallback if present
+                    const existing = container.querySelector('.macro-legend-list');
+                    if (existing) existing.remove();
+                    const list = document.createElement('div');
+                    list.className = 'macro-legend-list';
+                    list.style.cssText = 'margin-top:8px; font-size:13px; color:var(--text-secondary); display:flex; flex-direction:column; gap:6px;';
+                    const total = totalProtein + totalCarbs + totalFat || 1;
+                    const items = [
+                        { label: 'Protein', value: totalProtein, color: '#007aff' },
+                        { label: 'Carbs', value: totalCarbs, color: '#5856d6' },
+                        { label: 'Fat', value: totalFat, color: '#34c759' }
+                    ];
+                    items.forEach(it => {
+                        const pct = Math.round((it.value / total) * 100);
+                        const row = document.createElement('div');
+                        row.style.cssText = 'display:flex; align-items:center; gap:8px;';
+                        const sw = document.createElement('span'); sw.style.cssText = `width:12px; height:12px; background:${it.color}; display:inline-block; border-radius:2px;`;
+                        const txt = document.createElement('span'); txt.textContent = `${it.label}: ${Math.round(it.value)}g (${pct}%)`; txt.style.color = 'inherit';
+                        row.appendChild(sw); row.appendChild(txt); list.appendChild(row);
+                    });
+                    container.appendChild(list);
+                }
+            } catch (ee) { dbg(`Macro chart fallback error: ${ee && ee.message}`, 'error', ee); }
+        }
     } else {
         // Show message if no macro data
         const macroCanvas = document.getElementById('chart-macro-distribution');
@@ -2497,17 +3107,108 @@ function renderAnalytics(date) {
         ctx.textAlign = 'center';
         ctx.fillText('No macro data available for this day', macroCanvas.width / 2, macroCanvas.height / 2);
     }
+
+    // Health Score vs Macro Amount (binned averages, one smooth line per macro)
+    try {
+        const healthChartEl = document.getElementById('chart-macro-health-distribution');
+        if (healthChartEl) {
+            // Controls
+            const modeEl = document.getElementById('macro-health-mode');
+            const ptsEl = document.getElementById('macro-health-points');
+            const mode = modeEl ? modeEl.value : 'absolute';
+            const showPoints = ptsEl ? !!ptsEl.checked : true;
+
+            // Helper: build average macro amount per health score bin, and capture raw points
+            function buildMacroHealthByScore(macroName) {
+                const groups = {};
+                const raw = [];
+                filtered.forEach(e => {
+                    const hs = parseInt(e.healthScore, 10);
+                    const amt = parseFloat(e[macroName]);
+                    const cals = parseFloat(e.calories);
+                    if (isNaN(hs) || hs < 1 || hs > 10) return;
+                    if (isNaN(amt) || amt <= 0) return;
+                    let value = amt;
+                    if (mode === 'per100kcal') {
+                        if (isNaN(cals) || cals <= 0) return; // skip if cannot normalize
+                        value = amt / (cals / 100);
+                    }
+                    // accumulate group
+                    if (!groups[hs]) groups[hs] = { sum: 0, count: 0 };
+                    groups[hs].sum += value;
+                    groups[hs].count += 1;
+                    // raw point uses x=hs, y=value
+                    raw.push({ x: hs, y: Number(value.toFixed(2)) });
+                });
+                const scores = Object.keys(groups).map(k => parseInt(k, 10)).sort((a, b) => a - b);
+                if (scores.length === 0) return null;
+                const avgData = scores.map(s => {
+                    const avg = groups[s].sum / groups[s].count;
+                    return { x: s, y: Number(avg.toFixed(2)) };
+                });
+                return { avgData, raw };
+            }
+
+            const p = buildMacroHealthByScore('protein');
+            const c = buildMacroHealthByScore('carbs');
+            const f = buildMacroHealthByScore('fat');
+
+            const datasets = [];
+            if (p && p.avgData.length) datasets.push({ label: 'Protein', data: p.avgData, borderColor: '#007aff', backgroundColor: '#007aff', tension: 0.4, fill: false, pointRadius: 4 });
+            if (c && c.avgData.length) datasets.push({ label: 'Carbs', data: c.avgData, borderColor: '#5856d6', backgroundColor: '#5856d6', tension: 0.4, fill: false, pointRadius: 4 });
+            if (f && f.avgData.length) datasets.push({ label: 'Fat', data: f.avgData, borderColor: '#34c759', backgroundColor: '#34c759', tension: 0.4, fill: false, pointRadius: 4 });
+
+            // Add raw scatter datasets if requested
+            if (showPoints) {
+                if (p && p.raw.length) datasets.push({ label: 'Protein (points)', data: p.raw, type: 'scatter', backgroundColor: 'rgba(0,122,255,0.9)', pointRadius: 3, showLine: false });
+                if (c && c.raw.length) datasets.push({ label: 'Carbs (points)', data: c.raw, type: 'scatter', backgroundColor: 'rgba(88,86,214,0.9)', pointRadius: 3, showLine: false });
+                if (f && f.raw.length) datasets.push({ label: 'Fat (points)', data: f.raw, type: 'scatter', backgroundColor: 'rgba(52,199,89,0.9)', pointRadius: 3, showLine: false });
+            }
+
+            if (datasets.length > 0) {
+                charts.macroHealth = new Chart(healthChartEl, {
+                    type: 'line',
+                    data: { datasets: datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        parsing: false,
+                        scales: {
+                            x: { type: 'linear', min: 1, max: 10, ticks: { stepSize: 1 }, title: { display: true, text: 'Health Score (1-10)' } },
+                            y: { beginAtZero: true, title: { display: true, text: mode === 'per100kcal' ? 'Amount per 100 kcal' : 'Average Amount (g)' } }
+                        },
+                        plugins: {
+                            legend: { position: 'bottom' },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(ctx) {
+                                        if (!ctx.parsed) return '';
+                                        const y = ctx.parsed.y;
+                                        const x = ctx.parsed.x;
+                                        if (ctx.dataset.type === 'scatter') return `${ctx.dataset.label}: ${y} (${x})`;
+                                        return `${ctx.dataset.label}: ${y} ${mode === 'per100kcal' ? '(per100kcal)' : 'g'} (Health ${x})`;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            } else {
+                try { const ctx2 = healthChartEl.getContext('2d'); ctx2.clearRect(0,0,healthChartEl.width, healthChartEl.height); ctx2.font='13px -apple-system'; ctx2.fillStyle='#8e8e93'; ctx2.textAlign='center'; ctx2.fillText('Not enough macro+health data to plot', healthChartEl.width/2, healthChartEl.height/2); } catch (e) {}
+            }
+        }
+    } catch (e) { dbg(`Macro-health chart error: ${e && e.message}`, 'error', e); }
 }
 
 // --- CLEAR DATA ---
-function clearAllData() {
-    if (confirm('This will delete all local data. Data on GitHub will not be affected. Continue?')) {
-        state.entries = [];
-        state.sha = "";
-        render();
-        renderHistory();
-        dbg('Local data cleared', 'info');
-    }
+async function clearAllData() {
+    const proceed = await showConfirm('This will delete all local data. Data on GitHub will not be affected. Continue?');
+    if (!proceed) return;
+    state.entries = [];
+    state.sha = "";
+    render();
+    renderHistory();
+    dbg('Local data cleared', 'info');
 }
 
 // --- RELOAD APP ---
@@ -2655,6 +3356,17 @@ window.onload = async () => {
 
     // Auto-save is always on; no unload warning necessary.
     window.addEventListener('beforeunload', (e) => {});
+
+    // Ensure example CSV shows today's date and current time (AM/PM) and includes healthScore
+    try {
+        const pre = document.getElementById('example-csv');
+        if (pre) {
+            const today = getTodayString();
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+            pre.textContent = `date,time,food,calories,protein,carbs,fat,healthScore\n${today},${timeStr},Eggs (2 whole + 2 whites),220,20.0,2.0,10.0,7\n${today},,Korean BBQ noodles (90 g),289,7.4,37.4,12.2,6`;
+        }
+    } catch (e) { dbg('Failed to set example CSV: ' + (e && e.message), 'debug'); }
 };
 
 // Debug helper: write a small test entry to today's per-day file (call from browser console)
@@ -2744,6 +3456,7 @@ function parseCsv() {
         const proteinIdx = header.findIndex(h => h.includes('prot'));
         const carbsIdx = header.findIndex(h => h.includes('carb'));
         const fatIdx = header.findIndex(h => h.includes('fat'));
+        const healthScoreIdx = header.findIndex(h => h.includes('score') || h.includes('health'));
 
         csvTimeColumnFound = timeIdx >= 0;
         csvParsedData = [];
@@ -2801,6 +3514,11 @@ function parseCsv() {
             if (fatIdx >= 0 && values[fatIdx]) {
                 const fat = parseFloat(values[fatIdx]);
                 if (!isNaN(fat)) entry.fat = fat;
+            }
+
+            if (healthScoreIdx >= 0 && values[healthScoreIdx]) {
+                const hs = parseInt(values[healthScoreIdx], 10);
+                if (!isNaN(hs)) entry.healthScore = hs;
             }
             
             csvParsedData.push(entry);
@@ -2945,9 +3663,25 @@ function displayCsvPreview() {
         fatInput.placeholder = 'F (g)';
         fatInput.style.cssText = 'width:80px; padding:8px; font-size:13px;';
 
+        const scoreInput = document.createElement('select');
+        scoreInput.id = `csv-score-${idx}`;
+        scoreInput.style.cssText = 'width:80px; padding:8px; font-size:13px;';
+        const emptyScore = document.createElement('option');
+        emptyScore.value = '';
+        emptyScore.textContent = 'Score';
+        scoreInput.appendChild(emptyScore);
+        for (let s = 1; s <= 10; s++) {
+            const o = document.createElement('option');
+            o.value = String(s);
+            o.textContent = String(s);
+            if (entry.healthScore && parseInt(entry.healthScore, 10) === s) o.selected = true;
+            scoreInput.appendChild(o);
+        }
+
         macroRow.appendChild(proteinInput);
         macroRow.appendChild(carbsInput);
         macroRow.appendChild(fatInput);
+        macroRow.appendChild(scoreInput);
 
         left.appendChild(foodInput);
 
@@ -2983,6 +3717,7 @@ function displayCsvPreview() {
             proteinInput.value = entry.protein || '';
             carbsInput.value = entry.carbs || '';
             fatInput.value = entry.fat || '';
+            scoreInput.value = entry.healthScore || '';
         };
 
         right.appendChild(removeBtn);
@@ -3006,11 +3741,14 @@ function displayCsvPreview() {
             const f = parseFloat(fatInput.value);
             if (!isNaN(f)) updated.fat = f; else delete updated.fat;
 
+            const hs = parseInt(scoreInput.value, 10);
+            if (!isNaN(hs)) updated.healthScore = hs; else delete updated.healthScore;
+
             csvParsedData[idx] = { ...entry, ...updated };
             document.getElementById('csv-count').textContent = csvParsedData.length;
         };
 
-        [foodInput, caloriesInput, dateInput, timeInput, proteinInput, carbsInput, fatInput].forEach(inp => {
+        [foodInput, caloriesInput, dateInput, timeInput, proteinInput, carbsInput, fatInput, scoreInput].forEach(inp => {
             inp.addEventListener('change', commitChanges);
             inp.addEventListener('input', commitChanges);
         });
