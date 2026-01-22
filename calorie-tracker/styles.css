@@ -227,14 +227,14 @@ body, html {
 
 .entry-card { 
     background: var(--card-bg);
-    padding: 16px;
+    padding: 10px;
     border-radius: 12px;
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     box-shadow: var(--shadow);
     transition: transform 0.15s, box-shadow 0.15s;
-    min-height: 60px;
+    min-height: 48px;
 }
 
 .entry-card:active {
@@ -251,13 +251,13 @@ body, html {
     background: var(--danger);
     color: white;
     border: none;
-    padding: 10px 16px;
+    padding: 6px 12px;
     border-radius: 8px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
     transition: background 0.2s, transform 0.15s;
-    min-height: 44px;
+    min-height: 36px;
     white-space: nowrap;
 }
 

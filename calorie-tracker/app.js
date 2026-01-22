@@ -69,6 +69,15 @@ function updateDateButton() {
     btn.textContent = getTodayString();
 }
 
+// Helper: canonical today string used for filenames (YYYY-MM-DD)
+function getTodayString() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
+
 function updateBudgetUI(todayTotal) {
     const budget = parseInt(getConfig('dailyBudget') || 0, 10) || 0;
     // Calculate total if not passed
@@ -95,6 +104,53 @@ function updateBudgetUI(todayTotal) {
         } else {
             fill.style.background = 'linear-gradient(90deg, #34c759 0%, #ffd60a 60%, #ff3b30 100%)';
         }
+    }
+}
+
+// Main render entry used across the app. Kept minimal so it's safe to call
+// early in startup before other render helpers are defined.
+function render() {
+    try {
+        // Compute today's total only from entries that match the canonical today date
+        const today = getTodayString();
+        const todayTotal = Array.isArray(state.entries)
+            ? state.entries.reduce((s, e) => (getEntryDate(e) === today ? s + (parseFloat(e.calories) || 0) : s), 0)
+            : 0;
+        if (typeof updateBudgetUI === 'function') updateBudgetUI(todayTotal);
+
+        const activePage = document.querySelector('.page.active');
+
+        // Refresh history view if available
+        if (activePage && activePage.id === 'page-history' && typeof renderHistory === 'function') {
+            renderHistory();
+        }
+
+        // Render tracker list (today's entries) into #list-container
+        if (activePage && activePage.id === 'page-tracker') {
+            try {
+                const listContainer = document.getElementById('list-container');
+                if (listContainer) {
+                    listContainer.innerHTML = '';
+                    const today = getTodayString();
+                    const todayIdx = [];
+                    state.entries.forEach((e, i) => {
+                        const d = getEntryDate(e);
+                        if (d === today) todayIdx.push({ entry: e, idx: i });
+                    });
+
+                    if (todayIdx.length === 0) {
+                        listContainer.innerHTML = '<div class="empty-state">No entries for today. Add one above.</div>';
+                    } else {
+                        todayIdx.forEach(({ entry, idx }) => {
+                            const card = buildEntryCard(entry, idx, { mode: 'tracker' });
+                            listContainer.appendChild(card);
+                        });
+                    }
+                }
+            } catch (e) { dbg(`render tracker list error: ${e && e.message ? e.message : String(e)}`, 'error', e); }
+        }
+    } catch (e) {
+        try { dbg(`render error: ${e && e.message ? e.message : String(e)}`, 'error', e); } catch (eee) { /* ignore */ }
     }
 }
 
@@ -234,115 +290,119 @@ function chooseChunkFilename(existingItems, chunkSize) {
     return `${datePrefix}-part-${idx}.log`;
 }
 
-async function writeLogChunk(chunkText) {
-    const token = localStorage.getItem('gt_token');
-    const repo = localStorage.getItem('gt_repo');
-    if (!token || !repo) {
-        dbg('Cannot write log chunk: Missing credentials', 'error');
-        return false;
+// Shared builder used by tracker and history to produce identical entry boxes
+function buildEntryCard(entry, globalIndex, opts = {}) {
+    const mode = opts.mode || 'tracker'; // 'tracker' or 'history'
+    const isRangeView = !!opts.isRangeView;
+
+    const d = document.createElement('div');
+    d.className = 'entry-card';
+    d.id = `entry-${globalIndex}`;
+
+    if (mode === 'history' && state.historySelectMode && state.historySelectedEntries.has(globalIndex)) {
+        d.style.background = 'rgba(0, 122, 255, 0.1)';
+        d.style.borderLeft = '4px solid var(--primary)';
     }
 
-    // Ensure log folder exists by attempting to list it; GitHub will return 404 if missing.
-    let items = await listLogChunks();
-    // Determine filename based on sizes without downloading file contents
-    const chunkSize = new TextEncoder().encode(chunkText).length;
-    const filename = chooseChunkFilename(items, chunkSize);
-    const filePath = `${DEFAULT_LOG_FOLDER}/${filename}`;
-    const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+    // Left column: food, time, macros
+    const left = document.createElement('div');
+    left.style.flex = '1';
+    left.style.minWidth = '0'; // allow content to truncate/wrap inside flex column
 
-    const body = {
-        message: `Log chunk: ${filename}`,
-        content: btoa(unescape(encodeURIComponent(chunkText)))
-    };
+    const foodEl = document.createElement('div');
+    foodEl.style.fontWeight = '700';
+    foodEl.textContent = entry.food || '';
 
-    try {
-        const putRes = await fetch(url, { method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        if (putRes.ok) {
-            const txt = await putRes.text().catch(() => '');
-            dbg(`Wrote log chunk ${filePath}`, 'info');
-            return true;
-        } else {
-            const txt = await putRes.text().catch(() => '');
-            let err = {};
-            try { err = JSON.parse(txt); } catch (e) { err = { message: txt }; }
-            dbg(`Failed to write log chunk ${filePath}: ${err.message || putRes.statusText}`, 'error', err);
-            return false;
-        }
-    } catch (e) {
-        dbg(`writeLogChunk error: ${e.message}`, 'error');
-        return false;
-    }
-}
+    const timeEl = document.createElement('div');
+    timeEl.style.color = 'var(--text-secondary)';
+    timeEl.style.fontSize = '13px';
+    timeEl.textContent = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : (entry.time || '');
 
-async function saveLogsChunked() {
-    // Writes any new logs since last write in one chunk file (no reading of existing log files)
-    const token = localStorage.getItem('gt_token');
-    const repo = localStorage.getItem('gt_repo');
-    if (!token || !repo) {
-        dbg('Cannot save logs: Missing credentials', 'warn');
-        return false;
+    left.appendChild(foodEl);
+    left.appendChild(timeEl);
+
+    if (entry.protein || entry.carbs || entry.fat) {
+        const macros = [];
+        if (entry.protein) macros.push(`P: ${entry.protein}g`);
+        if (entry.carbs) macros.push(`C: ${entry.carbs}g`);
+        if (entry.fat) macros.push(`F: ${entry.fat}g`);
+        const m = document.createElement('div');
+        m.style.fontSize = '11px';
+        m.style.color = 'var(--text-secondary)';
+        m.style.marginTop = '2px';
+        m.innerText = macros.join(' | ');
+        left.appendChild(m);
     }
 
-    const maxSize = parseInt(getConfig('maxLogFileSize') || 50000, 10) || 50000;
-
-    // Nothing to write
-    if (!state.logs || state.logs.length <= state.logWriteIndex) {
-        dbg('No new logs to write', 'debug');
-        return true;
+    // Checkbox (history select mode)
+    const checkboxWrapper = document.createElement('div');
+    if (mode === 'history' && state.historySelectMode) {
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = state.historySelectedEntries.has(globalIndex);
+        cb.style.width = '20px';
+        cb.style.height = '20px';
+        cb.style.cursor = 'pointer';
+        cb.onchange = () => toggleHistoryEntrySelection(globalIndex);
+        checkboxWrapper.appendChild(cb);
     }
 
-    // Build chunk from new logs only
-    const newLogs = state.logs.slice(state.logWriteIndex);
-    const chunkText = `=== Logs chunked at ${new Date().toISOString()} ===\n` + newLogs.map(l => l.text).join('\n\n');
+    // Top-right: calories
+    const topRight = document.createElement('div');
+    topRight.style.display = 'flex';
+    topRight.style.gap = '8px';
+    topRight.style.alignItems = 'center';
+    const kcal = document.createElement('div');
+    kcal.style.fontWeight = '700';
+    kcal.textContent = `${Math.round(entry.calories || 0)} kcal`;
+    topRight.appendChild(kcal);
 
-    // Decide filename using list sizes
-    const items = await listLogChunks();
-    const filename = chooseChunkFilename(items, new TextEncoder().encode(chunkText).length);
+    // Top row (checkbox + content + calories)
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.gap = '12px';
+    row.style.alignItems = 'center';
+    row.style.width = '100%';
+    row.style.justifyContent = 'space-between'; // push calories to the far right
+    if (mode === 'history' && state.historySelectMode) row.appendChild(checkboxWrapper);
+    row.appendChild(left);
+    row.appendChild(topRight);
 
-    const ok = await writeLogChunk(chunkText);
-    if (ok) {
-        // Advance pointer so we don't rewrite same logs
-        state.logWriteIndex = state.logs.length;
-        dbg(`Saved ${newLogs.length} log entries as chunk ${filename}`, 'info');
-        return true;
-    } else {
-        dbg('Failed to write log chunk', 'error');
-        return false;
+    // Card container style
+    d.style.cssText = 'padding:12px; margin-bottom:8px; background: var(--card-bg); border-radius:10px; box-shadow: var(--shadow); display:flex; flex-direction:column;';
+    d.appendChild(row);
+
+    // Action footer (history places buttons at end; tracker uses same footer for parity)
+    const footer = document.createElement('div');
+    footer.style.display = 'flex';
+    footer.style.justifyContent = 'flex-end';
+    footer.style.gap = '8px';
+    footer.style.marginTop = '6px';
+    footer.style.width = '100%';
+    footer.style.alignItems = 'center';
+
+    const showEdit = !isRangeView && !(mode === 'history' && state.historySelectMode);
+    if (showEdit) {
+        const edit = document.createElement('button');
+        edit.style.cssText = 'background: #007aff; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; min-height:36px;';
+        edit.textContent = 'Edit';
+        edit.setAttribute('onclick', `editEntry(${globalIndex})`);
+        footer.appendChild(edit);
     }
-}
 
-function startAutoLog() {
-    stopAutoLog();
-    const mins = getAutoLogIntervalMinutes();
-    dbg(`Starting auto-log every ${mins} minute(s)`, 'info');
-    autoLogTimer = setInterval(() => {
-        // Fire-and-forget; errors logged internally
-        saveLogsChunked();
-    }, mins * 60 * 1000);
-}
-
-function stopAutoLog() {
-    if (autoLogTimer) {
-        clearInterval(autoLogTimer);
-        autoLogTimer = null;
-        dbg('Auto-log stopped', 'info');
+    if (!(mode === 'history' && state.historySelectMode)) {
+        const del = document.createElement('button');
+        del.style.cssText = 'background: #ff3b30; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; min-height:36px;';
+        del.textContent = 'Delete';
+        // history uses deleteEntryGlobal, tracker uses deleteEntry
+        const delFn = (mode === 'history') ? `deleteEntryGlobal(${globalIndex})` : `deleteEntry(${globalIndex})`;
+        del.setAttribute('onclick', delFn);
+        footer.appendChild(del);
     }
-}
 
-// Initialize auto-log on startup (if configured)
-try { startAutoLog(); } catch (e) { dbg(`Auto-log init failed: ${e.message}`, 'error'); }
+    if (footer.children.length > 0) d.appendChild(footer);
 
-function showNotification(message) {
-    const notification = document.createElement('div');
-    notification.className = 'notification';
-    notification.textContent = message;
-    notification.style.cssText = 'position: fixed; top: 80px; left: 50%; transform: translateX(-50%); background: var(--card-bg); padding: 12px 24px; border-radius: 20px; box-shadow: var(--shadow-lg); z-index: 1000; font-size: 14px; font-weight: 500;';
-    document.body.appendChild(notification);
-    setTimeout(() => {
-        notification.style.opacity = '0';
-        notification.style.transition = 'opacity 0.3s';
-        setTimeout(() => notification.remove(), 300);
-    }, 2000);
+    return d;
 }
 
 function updateRetention() {
@@ -356,7 +416,6 @@ function updateRetention() {
 
 function updateLogLevel() {
     const sel = document.getElementById('log-level');
-    if (!sel) return;
     state.logLevel = sel.value;
     dbg(`Log level changed to: ${sel.value.toUpperCase()}`, 'info');
 }
@@ -504,6 +563,11 @@ function showPage(p) {
         // Default history view: show only today's entries to avoid an expensive
         // full-folder fetch on every navigation. If the user requests a range
         // or older data, a fetch will be triggered from the range handler.
+        // Reset the prefetch attempts so returning to History can re-request
+        // missing date files if the local `state.entries` has changed while
+        // on other pages (e.g. tracker-only loads).
+        state.historyPrefetchAttempts.clear();
+
         state.dateRangeStart = getTodayString();
         state.dateRangeEnd = getTodayString();
         try {
@@ -840,24 +904,34 @@ function updateAutoSaveUI() {
 let autoSaveTimeout = null;
 function autoSave() {
     clearTimeout(autoSaveTimeout);
+    // Schedule the actual save work after a short debounce window.
     autoSaveTimeout = setTimeout(() => {
-        if (!state.autoSyncing) {
-            // Always use per-date replace sync so edits/deletes persist.
-            try {
-                // Avoid replacing remote per-date files with an empty array if we have no local entries.
-                if (!Array.isArray(state.entries) || state.entries.length === 0) {
-                    dbg('Auto-save skipped: no entries to persist', 'warn');
-                    return;
-                }
-                pushEntriesByDate(state.entries, { mode: 'replace' });
-            } catch (e) {
-                dbg(`Auto-save failed: ${e.message}`, 'error');
-            }
+        try {
+            performAutoSave();
+        } catch (e) {
+            dbg(`Auto-save failed: ${e && e.message ? e.message : String(e)}`, 'error');
         }
     }, 3000);
 }
 
+// Separated the actual auto-save work so the wrapper remains small.
+function performAutoSave() {
+    if (state.autoSyncing) return;
+    // Always use per-date replace sync so edits/deletes persist.
+    try {
+        // Avoid replacing remote per-date files with an empty array if we have no local entries.
+        if (!Array.isArray(state.entries) || state.entries.length === 0) {
+            dbg('Auto-save skipped: no entries to persist', 'warn');
+            return;
+        }
+        pushEntriesByDate(state.entries, { mode: 'replace' });
+    } catch (e) {
+        dbg(`performAutoSave error: ${e && e.message ? e.message : String(e)}`, 'error');
+    }
+}
+
 async function fetchFromGit(onlyToday = false) {
+    dbg(`fetchFromGit start (onlyToday=${onlyToday})`, 'debug');
     // Helper: fetch with timeout using AbortController to avoid hanging requests
     async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
         const controller = new AbortController();
@@ -879,6 +953,8 @@ async function fetchFromGit(onlyToday = false) {
     const token = localStorage.getItem('gt_token');
     const repo = localStorage.getItem('gt_repo');
 
+    dbg(`fetchFromGit: token present=${!!token} repo present=${!!repo}`, 'debug');
+
     if (!token || !repo) {
         dbg("Missing credentials - skipping GitHub fetch (no cache)", "warn");
         alert('Missing GitHub credentials. Open Settings and configure your token and repo first.');
@@ -886,13 +962,17 @@ async function fetchFromGit(onlyToday = false) {
         return;
     }
 
-    const dataFolder = getConfig('dataFolder');
-    dbg(`Fetching data from GitHub`, 'info');
-    dbg(`Repository: ${repo}`, 'debug');
-    dbg(`Data folder: ${dataFolder}`, 'debug');
+    let activeBtn = null;
+    try {
+        const dataFolder = getConfig('dataFolder');
+        dbg(`Fetching data from GitHub`, 'info');
+        dbg(`Repository: ${repo}`, 'debug');
+        dbg(`Configured data folder: ${dataFolder}`, 'debug');
+        dbg(`Data folder: ${dataFolder}`, 'debug');
 
-    const activeBtn = document.querySelector('[onclick^="fetchFromGit"]');
-    if (activeBtn) activeBtn.classList.add('loading');
+        activeBtn = document.querySelector('[onclick^="fetchFromGit"]');
+        dbg(`Active fetch button found: ${!!activeBtn}`, 'debug');
+        if (activeBtn) activeBtn.classList.add('loading');
 
     // If a data folder is configured, prefer listing and fetching per-date files.
     if (dataFolder) {
@@ -905,6 +985,7 @@ async function fetchFromGit(onlyToday = false) {
             try {
                 const r = await fetchWithTimeout(fileUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } }, 15000);
                 dbg(`Today's file fetch status: ${r.status}`, 'debug');
+                dbg(`Today's file fetch response ok=${r.ok} status=${r.status}`, 'debug');
                 if (r.ok) {
                     const j = await r.json();
                     dbg(`Today's file response keys: ${Object.keys(j).join(', ')}`, 'debug');
@@ -946,7 +1027,6 @@ async function fetchFromGit(onlyToday = false) {
                 return;
             }
         }
-
         // Full listing: list folder and fetch recent per-date files
         const listUrl = `https://api.github.com/repos/${repo}/contents/${dataFolder}`;
         dbg(`Listing folder: ${listUrl}`, 'debug');
@@ -954,9 +1034,9 @@ async function fetchFromGit(onlyToday = false) {
             const listRes = await fetchWithTimeout(listUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } }, 15000);
             dbg(`Folder list status: ${listRes.status}`, 'debug');
                 if (listRes.ok) {
-                const items = await listRes.json();
-                dbg(`Folder listing returned ${items.length} items`, 'debug');
-                dbg(`Folder items preview: ${items.slice(0,20).map(it=>it.name).join(', ')}`, 'debug');
+                    const items = await listRes.json();
+                    dbg(`Folder listing returned ${items.length} items`, 'debug');
+                    dbg(`Folder items preview: ${items.slice(0,20).map(it=>it.name).join(', ')}`, 'debug');
                 // Filter for YYYY-MM-DD.json files
                 const dateItems = (items || []).filter(it => it.type === 'file' && /^\d{4}-\d{2}-\d{2}\.json$/.test(it.name));
                 dateItems.sort((a, b) => b.name.localeCompare(a.name)); // newest first by name
@@ -970,6 +1050,7 @@ async function fetchFromGit(onlyToday = false) {
                 const merged = [];
                 for (let i = 0; i < toFetch.length; i += CHUNK) {
                     const chunk = toFetch.slice(i, i + CHUNK);
+                    dbg(`Fetching chunk ${i / CHUNK + 1}: ${chunk.map(it => it.name).join(', ')}`, 'debug');
                     const promises = chunk.map(async (it) => {
                         try {
                             const r = await fetchWithTimeout(it.url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } }, 15000);
@@ -1027,6 +1108,12 @@ async function fetchFromGit(onlyToday = false) {
             if (activeBtn) activeBtn.classList.remove('loading');
             return;
         }
+    }
+    } catch (err) {
+        dbg(`fetchFromGit top-level error: ${err && err.message ? err.message : String(err)}`, 'error', err);
+        try { if (activeBtn) activeBtn.classList.remove('loading'); } catch (e) { /* ignore */ }
+        // Ensure caller doesn't hang; return after logging
+        return;
     }
     // No legacy single-file behavior. If dataFolder is not configured we don't load or create data.json.
     dbg('No data folder configured; no data loaded', 'warn');
@@ -1595,15 +1682,10 @@ async function addEntry() {
     }, 500);
 }
 
-// --- HISTORY PAGE ---
-function renderHistory() {
-    const container = document.getElementById('history-container');
-    if (!container) return;
-    // If the user requested a specific date/range that's not present in `state.entries`,
-    // fetch the full data folder (only once) so history can show older dates.
+// --- HISTORY PAGE (refactored into helpers) ---
+function ensureHistoryPrefetchIfNeeded() {
     try {
         if ((state.dateRangeStart || state.dateRangeEnd) && !state.historyFetchInProgress) {
-            // Build list of target dates to check (if single day, just that; if range, check start..end inclusive)
             const targets = [];
             if (state.dateRangeStart && state.dateRangeEnd) {
                 let cur = new Date(state.dateRangeStart);
@@ -1618,11 +1700,6 @@ function renderHistory() {
                 targets.push(state.dateRangeEnd);
             }
 
-            // Require ALL target dates to be present locally before skipping a full fetch.
-            // Previously this used `some(...)` which incorrectly skipped fetching when
-            // the requested range included any single loaded date (e.g. today). That
-            // caused 'Last 7 days' to show only today's entries if the app had only
-            // fetched today's file.
             const hasAll = targets.every(td => state.entries.some(e => getEntryDate(e) === td));
             if (!hasAll) {
                 const key = targets.join(',');
@@ -1635,89 +1712,64 @@ function renderHistory() {
                         renderHistory();
                     }).catch(err => {
                         state.historyFetchInProgress = false;
-                        dbg(`Failed to fetch full data folder for history: ${err.message}`, 'error');
+                        dbg(`Failed to fetch full data folder for history: ${err && err.message ? err.message : String(err)}`, 'error');
                     });
-                    // Return early only when we actually kick off a fetch to avoid duplicate requests.
-                    return;
+                    return true; // fetch kicked off
                 } else {
                     dbg(`Already attempted prefetch for [${key}] — skipping additional fetch to avoid loop`, 'warn');
-                    // Continue to render with whatever entries are currently loaded (may be empty).
                 }
             }
         }
-    } catch (e) { dbg(`renderHistory prefetch check error: ${e.message}`, 'error'); }
-    
+    } catch (e) { dbg(`ensureHistoryPrefetchIfNeeded error: ${e && e.message ? e.message : String(e)}`, 'error'); }
+    return false;
+}
+
+function computeFilteredEntries() {
     const foodFilter = document.getElementById('filter-food')?.value.toLowerCase();
-    dbg(`renderHistory start: totalEntries=${state.entries.length} dateRangeStart=${state.dateRangeStart} dateRangeEnd=${state.dateRangeEnd} foodFilter=${foodFilter || 'none'}`, 'debug');
-    
-    let filtered = state.entries;
-    
-    // Apply date range filter (use canonical entry date)
+    dbg(`computeFilteredEntries: totalEntries=${state.entries.length} dateRangeStart=${state.dateRangeStart} dateRangeEnd=${state.dateRangeEnd} foodFilter=${foodFilter || 'none'}`, 'debug');
+
+    let filtered = state.entries.slice();
+
     if (state.dateRangeStart && state.dateRangeEnd) {
         if (state.dateRangeStart === state.dateRangeEnd) {
-            // Single day
             filtered = filtered.filter(e => getEntryDate(e) === state.dateRangeStart);
         } else {
-            // Date range
             filtered = filtered.filter(e => {
                 const ed = getEntryDate(e);
                 return ed && ed >= state.dateRangeStart && ed <= state.dateRangeEnd;
             });
         }
-    } // If no date range is set, show all entries by default
-    
-    if (foodFilter) {
-        filtered = filtered.filter(e => e.food?.toLowerCase().includes(foodFilter));
     }
 
-    dbg(`Filtered history: ${filtered.length} entries after date/food filters`, 'debug');
-    
-    
-    // Sort by timestamp descending (newest first)
+    if (foodFilter) filtered = filtered.filter(e => e.food?.toLowerCase().includes(foodFilter));
+
+    // newest-first
     filtered.sort((a, b) => {
         const timeA = new Date(a.timestamp || a.date).getTime();
         const timeB = new Date(b.timestamp || b.date).getTime();
         return timeB - timeA;
     });
-    
-    // Update stats
-    document.getElementById('history-total-entries').innerText = filtered.length;
-    const totalCal = filtered.reduce((sum, e) => sum + (parseFloat(e.calories) || 0), 0);
-    document.getElementById('history-total-calories').innerText = Math.round(totalCal);
-    
-    // Calculate avg per day
-    const uniqueDates = [...new Set(filtered.map(e => getEntryDate(e)).filter(Boolean))];
-    const avgPerDay = uniqueDates.length > 0 ? Math.round(totalCal / uniqueDates.length) : 0;
-    document.getElementById('history-avg-calories').innerText = avgPerDay;
-    
-    // Determine if showing single day (allows edit) or range (no edit)
-    const isSingleDay = state.dateRangeStart && state.dateRangeEnd && state.dateRangeStart === state.dateRangeEnd;
-    const isRangeView = state.dateRangeStart && state.dateRangeEnd && state.dateRangeStart !== state.dateRangeEnd;
-    
-    // Reset container to avoid duplicate renders
-    container.innerHTML = '';
 
-    // Date input placeholder is updated in handleDateSelection/clearFilters
+    return filtered;
+}
 
-    // Empty-state when no entries match filters
-    if (filtered.length === 0) {
-        container.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No entries found for the selected filters.</div>';
-        return;
-    }
+function buildHistoryStats(filtered) {
+    try {
+        document.getElementById('history-total-entries').innerText = filtered.length;
+        const totalCal = filtered.reduce((sum, e) => sum + (parseFloat(e.calories) || 0), 0);
+        document.getElementById('history-total-calories').innerText = Math.round(totalCal);
+        const uniqueDates = [...new Set(filtered.map(e => getEntryDate(e)).filter(Boolean))];
+        const avgPerDay = uniqueDates.length > 0 ? Math.round(totalCal / uniqueDates.length) : 0;
+        document.getElementById('history-avg-calories').innerText = avgPerDay;
+    } catch (e) { dbg(`buildHistoryStats error: ${e && e.message ? e.message : String(e)}`, 'error'); }
+}
 
-    // Group entries by date (descending). Each group will be a page unit for pagination.
-    dbg(`Grouping ${filtered.length} entries by date`, 'debug');
-    const groups = groupByDate(filtered); // { date: [entries] }
-    const sortedDates = Object.keys(groups).sort((a, b) => (new Date(b).getTime() - new Date(a).getTime()));
-    dbg(`Found ${sortedDates.length} date groups`, 'info');
-
-    // Pagination state for history: entriesPerPage here means number of date groups per page
+function buildPageControls(container, sortedDates) {
     const perPage = 5;
     if (!state.historyPage) state.historyPage = 1;
     const totalPages = Math.max(1, Math.ceil(sortedDates.length / perPage));
     if (state.historyPage > totalPages) state.historyPage = totalPages;
 
-    // Build page control UI
     const pageControls = document.createElement('div');
     pageControls.style.cssText = 'display:flex; justify-content:center; gap:8px; margin-bottom:12px;';
     const prevBtn = document.createElement('button');
@@ -1739,14 +1791,75 @@ function renderHistory() {
 
     container.appendChild(pageControls);
 
-    // Determine which date groups to show on this page
     const startIdx = (state.historyPage - 1) * perPage;
     const pageDates = sortedDates.slice(startIdx, startIdx + perPage);
+    return pageDates;
+}
+
+function createEntryCard(entry, globalIndex, isRangeView, dateStr) {
+    return buildEntryCard(entry, globalIndex, { mode: 'history', isRangeView: !!isRangeView });
+}
+
+function renderHistory() {
+    const container = document.getElementById('history-container');
+    if (!container) return;
+
+    // Sync date-range from UI controls so returning to the page reflects
+    // the dropdown/input selection (prevents visual selection without state match).
+    try {
+        const rangeSel = document.getElementById('range-select');
+        if (rangeSel) {
+            const v = rangeSel.value;
+            const today = getTodayString();
+            let newStart = null;
+            let newEnd = null;
+            if (!v || v === 'all') {
+                newStart = null; newEnd = null;
+            } else if (v === 'today') {
+                newStart = today; newEnd = today;
+            } else if (v === 'yesterday') {
+                newStart = addDaysToDateString(today, -1);
+                newEnd = newStart;
+            } else {
+                const days = parseInt(v, 10);
+                if (!isNaN(days)) {
+                    newStart = addDaysToDateString(today, -(days - 1));
+                    newEnd = today;
+                }
+            }
+            if (newStart !== state.dateRangeStart || newEnd !== state.dateRangeEnd) {
+                state.dateRangeStart = newStart;
+                state.dateRangeEnd = newEnd;
+                state.historyPage = 1;
+            }
+        }
+    } catch (e) { dbg(`renderHistory sync error: ${e && e.message ? e.message : String(e)}`, 'error'); }
+
+    // If a prefetch was initiated, the helper already kicked off a fetch and will recall renderHistory when done.
+    if (ensureHistoryPrefetchIfNeeded()) return;
+
+    const filtered = computeFilteredEntries();
+    buildHistoryStats(filtered);
+
+    container.innerHTML = '';
+    if (filtered.length === 0) {
+        container.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No entries found for the selected filters.</div>';
+        return;
+    }
+
+    dbg(`Grouping ${filtered.length} entries by date`, 'debug');
+    const groups = groupByDate(filtered);
+    const sortedDates = Object.keys(groups).sort((a, b) => (new Date(b).getTime() - new Date(a).getTime()));
+    dbg(`Found ${sortedDates.length} date groups`, 'info');
+
+    const pageDates = buildPageControls(container, sortedDates);
     dbg(`Rendering history page ${state.historyPage} (dates on page: ${pageDates.join(', ')})`, 'debug');
 
-    // Render each date group
+    const isRangeView = state.dateRangeStart && state.dateRangeEnd && state.dateRangeStart !== state.dateRangeEnd;
+
+    // Render each date group on the page
     pageDates.forEach(dateStr => {
-        const group = groups[dateStr];
+        const group = groups[dateStr] || [];
         const header = document.createElement('div');
         header.style.cssText = 'font-weight:700; margin: 12px 0 8px 0;';
         header.textContent = `${dateStr} (${group.length})`;
@@ -1760,52 +1873,9 @@ function renderHistory() {
 
         group.forEach(entry => {
             const globalIndex = state.entries.indexOf(entry);
-            if (globalIndex === -1) {
-                dbg(`Warning: entry for date ${dateStr} not found in state.entries via indexOf — possible identity mismatch`, 'warn', entry);
-            }
-            const d = document.createElement('div');
-            d.className = 'entry-card';
-            d.id = `entry-${globalIndex}`;
-
-            if (state.historySelectMode && state.historySelectedEntries.has(globalIndex)) {
-                d.style.background = 'rgba(0, 122, 255, 0.1)';
-                d.style.borderLeft = '4px solid var(--primary)';
-            }
-
-            const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : (entry.time || '');
-            let display = `${entry.food} - ${entry.calories} kcal`;
-
-            let macroInfo = '';
-            if (entry.protein || entry.carbs || entry.fat) {
-                const macros = [];
-                if (entry.protein) macros.push(`P: ${entry.protein}g`);
-                if (entry.carbs) macros.push(`C: ${entry.carbs}g`);
-                if (entry.fat) macros.push(`F: ${entry.fat}g`);
-                macroInfo = `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">${macros.join(' | ')}</div>`;
-            }
-
-            const checkbox = state.historySelectMode ? `<input type="checkbox" ${state.historySelectedEntries.has(globalIndex) ? 'checked' : ''} onchange="toggleHistoryEntrySelection(${globalIndex})" style="width: 20px; height: 20px; cursor: pointer;">` : '';
-            const showEdit = !isRangeView && !state.historySelectMode;
-            const editButton = showEdit ? `<button onclick="editEntry(${globalIndex})" style="background: #007aff; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;">Edit</button>` : '';
-            const deleteButton = !state.historySelectMode ? `<button onclick="deleteEntryGlobal(${globalIndex})" style="background: #ff3b30; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;">Delete</button>` : '';
-
-            d.innerHTML = `
-                <div style="display: flex; gap: 12px; align-items: center;">
-                    ${checkbox}
-                    <div style="flex: 1;">
-                        <div style="font-weight: 500;">${display}</div>
-                        ${macroInfo}
-                        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-                            ${time}
-                        </div>
-                    </div>
-                    <div style="display: flex; gap: 8px;">
-                        ${editButton}
-                        ${deleteButton}
-                    </div>
-                </div>
-            `;
-            container.appendChild(d);
+            if (globalIndex === -1) dbg(`Warning: entry for date ${dateStr} not found in state.entries via indexOf — possible identity mismatch`, 'warn');
+            const card = createEntryCard(entry, globalIndex, isRangeView, dateStr);
+            container.appendChild(card);
         });
     });
     dbg('renderHistory complete', 'debug');
@@ -1845,6 +1915,19 @@ function getEntryDate(entry) {
         } catch (e) { /* ignore */ }
     }
     return null;
+}
+
+// Helper: format a Date object as local YYYY-MM-DD string
+function formatDateLocal(d) {
+    try {
+        if (!(d instanceof Date)) d = new Date(d);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    } catch (e) {
+        return null;
+    }
 }
 
 function addDaysToDateString(dateStr, days) {
