@@ -50,6 +50,14 @@ schema:
       min: 0
       placeholder: "Optional"
       
+    - name: "healthScore"
+      type: "number"
+      label: "Health Score (1-10)"
+      required: false
+      min: 1
+      max: 10
+      placeholder: "Optional - 1 (poor) .. 10 (excellent)"
+      
     - name: "time"
       type: "select"
       label: "Time"
