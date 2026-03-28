@@ -1,0 +1,19 @@
+<div class="app-container">
+  <header class="app-header">
+    <h1>📊 Calorie Tracker</h1>
+  </header>
+
+  <nav class="app-nav">
+    <button 
+      *ngFor="let page of pages" 
+      class="nav-btn"
+      [class.active]="currentRoute === page.route"
+      (click)="navigateTo(page.route)">
+      {{ page.icon }} {{ page.label }}
+    </button>
+  </nav>
+
+  <main class="app-main">
+    <router-outlet></router-outlet>
+  </main>
+</div>

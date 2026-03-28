@@ -1,0 +1,187 @@
+.tracker-container {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.info-card {
+  text-align: center;
+  
+  h3 {
+    margin: 0 0 8px 0;
+  }
+  
+  p {
+    margin: 0 0 16px 0;
+    opacity: 0.8;
+  }
+}
+
+/* Loader moved to global styles.scss */
+
+.warning-card {
+  background: linear-gradient(135deg, #ff9500 0%, #ffb340 100%);
+  color: white;
+  
+  h3 {
+    margin: 0 0 8px 0;
+  }
+  
+  p {
+    margin: 0;
+    opacity: 0.9;
+  }
+}
+
+.error-card {
+  background: linear-gradient(135deg, #ff3b30 0%, #ff6b60 100%);
+  color: white;
+  
+  h3 {
+    margin: 0 0 8px 0;
+  }
+  
+  p {
+    margin: 0;
+    opacity: 0.9;
+  }
+}
+
+.summary-card {
+  h2 {
+    margin: 0 0 16px 0;
+    font-size: 24px;
+    color: var(--text);
+  }
+}
+
+.summary-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 16px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  
+  &.over-budget .stat-value {
+    color: var(--danger);
+  }
+}
+
+.stat-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.form-card {
+  h3 {
+    margin: 0 0 20px 0;
+  }
+}
+
+.form-group {
+  margin-bottom: 16px;
+  
+  label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  
+  input, select {
+    width: 100%;
+  }
+}
+
+.entries-card {
+  h3 {
+    margin: 0 0 16px 0;
+  }
+}
+
+.empty-state {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.entry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.entry-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: var(--bg);
+  border-radius: 10px;
+  gap: 12px;
+}
+
+.entry-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.entry-food {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry-details {
+  display: flex;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.entry-calories {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.entry-macro {
+  font-size: 12px;
+}
+
+.btn-delete {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 20px;
+  padding: 8px;
+  border-radius: 8px;
+  transition: all 0.2s;
+  
+  &:hover {
+    background: rgba(255, 59, 48, 0.1);
+  }
+  
+  &:active {
+    transform: scale(0.9);
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}

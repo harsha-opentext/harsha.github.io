@@ -1,0 +1,64 @@
+<div class="analytics-container">
+  <div class="card">
+    <h2>📊 Analytics</h2>
+    
+    <div class="filters">
+      <div class="filter-group">
+        <label>View Mode:</label>
+        <select [(ngModel)]="viewMode" (change)="onViewModeChange()" [disabled]="loading">
+          <option value="period">Time Period</option>
+          <option value="single">Single Day</option>
+        </select>
+      </div>
+      
+      <div class="filter-group" *ngIf="viewMode === 'period'">
+        <select [(ngModel)]="timePeriod" (change)="onPeriodChange()" [disabled]="loading">
+          <option value="7">Last 7 Days</option>
+          <option value="14">Last 14 Days</option>
+          <option value="30">Last 30 Days</option>
+          <option value="90">Last 90 Days</option>
+          <option value="all">All Time</option>
+        </select>
+      </div>
+      
+      <div class="filter-group" *ngIf="viewMode === 'single'">
+        <input type="date" [(ngModel)]="selectedDate" (change)="onDateChange()" [disabled]="loading" />
+      </div>
+      
+      <span *ngIf="loading" class="loader small-loader"></span>
+    </div>
+
+    <div class="stats-summary" *ngIf="!loading">
+       <div class="stat-item">
+         <span class="label">Total Calories</span>
+         <span class="value">{{ totalCalories }}</span>
+       </div>
+       <div class="stat-item">
+         <span class="label">Avg Daily</span>
+         <span class="value">{{ avgCalories }}</span>
+       </div>
+    </div>
+    
+    <div class="charts-grid" [style.opacity]="loading ? '0.5' : '1'">
+      <div class="chart-card" *ngIf="viewMode === 'period'">
+        <h3>Daily Trend</h3>
+        <canvas #lineChart></canvas>
+      </div>
+      
+      <div class="chart-card" *ngIf="viewMode === 'single'">
+        <h3>Calorie Distribution by Meal</h3>
+        <canvas #mealChart></canvas>
+      </div>
+      
+      <div class="chart-card">
+        <h3>Macro Distribution</h3>
+        <canvas #doughnutChart></canvas>
+      </div>
+      
+      <div class="chart-card" *ngIf="viewMode === 'period'">
+        <h3>Weekly Comparison</h3>
+        <canvas #barChart></canvas>
+      </div>
+    </div>
+  </div>
+</div>

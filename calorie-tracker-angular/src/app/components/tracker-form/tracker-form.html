@@ -1,0 +1,113 @@
+<div class="tracker-container">
+  <!-- Initial Loading State -->
+  <div *ngIf="initialLoading" class="card info-card">
+    <h3>⏳ Loading...</h3>
+    <p>Initializing application and loading schema...</p>
+    <div class="loader"></div>
+  </div>
+
+  <ng-container *ngIf="!initialLoading">
+  <!-- Error Message -->
+  <div *ngIf="errorMessage" class="card error-card">
+    <h3>⚠️ Error</h3>
+    <p>{{ errorMessage }}</p>
+  </div>
+
+  <!-- Credentials Warning -->
+  <div *ngIf="!hasCredentials && schemaFields.length > 0" class="card warning-card">
+    <h3>⚠️ Configuration Required</h3>
+    <p>Please configure your GitHub credentials in Settings to use the tracker.</p>
+  </div>
+
+  <!-- Daily Summary -->
+  <div class="card summary-card">
+    <h2>{{ todayDate }}</h2>
+    <div class="summary-stats">
+      <div class="stat">
+        <span class="stat-label">Today's Total</span>
+        <span class="stat-value">{{ getTodayTotal() }} kcal</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Daily Budget</span>
+        <span class="stat-value">{{ getDailyBudget() }} kcal</span>
+      </div>
+      <div class="stat" [class.over-budget]="getRemainingCalories() < 0">
+        <span class="stat-label">Remaining</span>
+        <span class="stat-value">{{ getRemainingCalories() }} kcal</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Entry Form -->
+  <div class="card form-card" *ngIf="hasCredentials">
+    <h3>📝 Add Entry</h3>
+    <form (ngSubmit)="addEntry()">
+      <div class="form-group" *ngFor="let field of schemaFields">
+        <label [for]="field.name">{{ field.label }}</label>
+        <input
+          *ngIf="field.type === 'text'"
+          [id]="field.name"
+          type="text"
+          [(ngModel)]="formData[field.name]"
+          [name]="field.name"
+          [placeholder]="field.placeholder || ''"
+          [required]="field.required || false"
+        />
+        <input
+          *ngIf="field.type === 'number'"
+          [id]="field.name"
+          type="number"
+          [(ngModel)]="formData[field.name]"
+          [name]="field.name"
+          [placeholder]="field.placeholder || ''"
+          [required]="field.required || false"
+          [min]="field.min || 0"
+        />
+        <input
+          *ngIf="field.type === 'date'"
+          [id]="field.name"
+          type="date"
+          [(ngModel)]="formData[field.name]"
+          [name]="field.name"
+          [required]="field.required || false"
+        />
+        <select
+          *ngIf="field.type === 'select'"
+          [id]="field.name"
+          [(ngModel)]="formData[field.name]"
+          [name]="field.name"
+          [required]="field.required || false"
+        >
+          <option value="">Select...</option>
+          <option *ngFor="let opt of field.options" [value]="opt">{{ opt }}</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary" [disabled]="loading" [class.loading]="loading">
+        Add Entry
+      </button>
+    </form>
+  </div>
+
+  <!-- Today's Entries -->
+  <div class="card entries-card" *ngIf="hasCredentials">
+    <h3>Today's Entries ({{ todayEntries.length }})</h3>
+    <div *ngIf="todayEntries.length === 0" class="empty-state">
+      No entries yet. Add your first one above!
+    </div>
+    <div class="entry-list">
+      <div class="entry-item" *ngFor="let entry of todayEntries">
+        <div class="entry-info">
+          <div class="entry-food">{{ entry.food }}</div>
+          <div class="entry-details">
+            <span class="entry-calories">{{ entry.calories }} kcal</span>
+            <span *ngIf="entry.protein" class="entry-macro">P: {{ entry.protein }}g</span>
+            <span *ngIf="entry.carbs" class="entry-macro">C: {{ entry.carbs }}g</span>
+            <span *ngIf="entry.fat" class="entry-macro">F: {{ entry.fat }}g</span>
+          </div>
+        </div>
+        <button class="btn-delete" (click)="deleteEntry(entry)" [disabled]="loading">🗑️</button>
+      </div>
+    </div>
+  </div>
+  </ng-container>
+</div>

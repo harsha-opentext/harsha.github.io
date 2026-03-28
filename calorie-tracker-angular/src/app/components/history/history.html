@@ -1,0 +1,85 @@
+<div class="history-container">
+  <div class="card">
+    <h2>📅 History</h2>
+    
+    <!-- Credentials Warning -->
+    <div *ngIf="!hasCredentials" class="warning-message">
+      <p>⚠️ Configure GitHub credentials in Settings to load historical data.</p>
+    </div>
+    
+    <!-- Quick Filters -->
+    <div class="quick-filters">
+      <button class="btn btn-secondary" (click)="setYesterday()" [disabled]="loading">Yesterday</button>
+      <button class="btn btn-secondary" (click)="setQuickFilter(7)" [disabled]="loading">Last 7 Days</button>
+      <button class="btn btn-secondary" (click)="clearFilters()" [disabled]="loading">Today</button>
+    </div>
+    
+    <!-- Custom Date Range -->
+    <div class="filters">
+      <div class="date-inputs">
+        <div class="date-input-group">
+          <label>From</label>
+          <input
+            type="date"
+            [(ngModel)]="tempStartDate"
+            placeholder="Start Date"
+          />
+        </div>
+        <div class="date-input-group">
+          <label>To</label>
+          <input
+            type="date"
+            [(ngModel)]="tempEndDate"
+            placeholder="End Date"
+          />
+        </div>
+      </div>
+      <button class="btn btn-primary" (click)="applyFilter()" [disabled]="loading">Apply Filter</button>
+    </div>
+
+    <!-- Loading State -->
+    <div *ngIf="loading" class="loading-state text-center" style="padding: 40px;">
+      <div class="loader"></div>
+      <p style="margin-top: 15px; color: #666;">Loading history data...</p>
+    </div>
+    
+    <!-- Statistics -->
+    <div class="stats-card" *ngIf="!loading && filteredEntries.length > 0">
+      <div class="stat-item">
+        <span class="stat-label">Total Entries</span>
+        <span class="stat-value">{{ filteredEntries.length }}</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Days in Range</span>
+        <span class="stat-value">{{ daysInRange }}</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Total Calories</span>
+        <span class="stat-value">{{ totalCalories }} kcal</span>
+      </div>
+      <div class="stat-item highlight">
+        <span class="stat-label">Average Per Day</span>
+        <span class="stat-value">{{ averageCalories }} kcal</span>
+      </div>
+    </div>
+    
+    <!-- Entries List -->
+    <div class="entries-list" *ngIf="!loading">
+      <div *ngIf="filteredEntries.length === 0" class="empty-state">
+        <p>No entries found for the selected date range.</p>
+      </div>
+      
+      <div *ngFor="let entry of filteredEntries" class="entry-card">
+        <div class="entry-header">
+          <span class="entry-date">{{ entry.timestamp | date:dateTimeFormat }}</span>
+          <button class="btn-icon btn-danger" (click)="deleteEntry(entry)">🗑️</button>
+        </div>
+        <div class="entry-content">
+          <div *ngFor="let field of schemaFields">
+            <strong>{{ field.label }}:</strong> {{ entry[field.name] }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,104 @@
+.logs-container {
+  padding: 20px;
+}
+
+.log-controls {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  
+  select {
+    flex: 1;
+    max-width: 200px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 16px;
+    background: white;
+    cursor: pointer;
+    
+    &:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1);
+    }
+  }
+  
+  button.success {
+    background: #34c759 !important;
+    border-color: #34c759 !important;
+    transition: background 0.3s ease;
+  }
+}
+
+.logs-list {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  max-height: 600px;
+  overflow-y: auto;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+}
+
+.log-entry {
+  display: flex;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  
+  &:last-child {
+    border-bottom: none;
+  }
+  
+  .log-timestamp {
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+  
+  .log-type {
+    font-weight: 600;
+    white-space: nowrap;
+    min-width: 60px;
+  }
+  
+  .log-message {
+    flex: 1;
+    word-break: break-word;
+  }
+  
+  &.log-debug {
+    .log-type {
+      color: #8e8e93;
+    }
+  }
+  
+  &.log-info {
+    .log-type {
+      color: #007aff;
+    }
+  }
+  
+  &.log-warn {
+    .log-type {
+      color: #ff9500;
+    }
+  }
+  
+  &.log-error {
+    .log-type {
+      color: #ff3b30;
+    }
+    background: rgba(255, 59, 48, 0.05);
+    padding: 8px;
+    margin: 0 -8px;
+    border-radius: 6px;
+  }
+}
+
+.empty-state {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--text-secondary);
+}

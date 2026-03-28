@@ -1,0 +1,38 @@
+<div class="logs-container">
+  <div class="card">
+    <h2>📋 System Logs</h2>
+    
+    <div class="log-controls">
+      <select [(ngModel)]="logLevel" (change)="filterLogs()">
+        <option value="all">All Levels</option>
+        <option value="debug">Debug</option>
+        <option value="info">Info</option>
+        <option value="warn">Warning</option>
+        <option value="error">Error</option>
+      </select>
+      <button class="btn btn-primary" (click)="copyLogs()" [class.success]="copySuccess">
+        {{ copySuccess ? '✓ Copied!' : '📋 Copy' }}
+      </button>
+      <button class="btn btn-secondary" (click)="clearLogs()">Clear Logs</button>
+    </div>
+    
+    <div class="logs-list">
+      <div *ngIf="filteredLogs.length === 0" class="empty-state">
+        <p>No logs to display.</p>
+      </div>
+      
+      <div
+        *ngFor="let log of filteredLogs"
+        class="log-entry"
+        [class.log-debug]="log.type === 'debug'"
+        [class.log-info]="log.type === 'info'"
+        [class.log-warn]="log.type === 'warn'"
+        [class.log-error]="log.type === 'error'"
+      >
+        <span class="log-timestamp">{{ log.timestamp | logTimeFormat }}</span>
+        <span class="log-type">{{ log.type.toUpperCase() }}</span>
+        <span class="log-message">{{ log.message }}</span>
+      </div>
+    </div>
+  </div>
+</div>

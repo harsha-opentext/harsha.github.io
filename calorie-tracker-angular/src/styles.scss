@@ -1,0 +1,121 @@
+/* Global Styles - iOS-inspired design */
+:root { 
+    --bg: #f4f7f6; 
+    --primary: #007aff; 
+    --primary-hover: #0051d5;
+    --secondary: #5856d6;
+    --success: #34c759;
+    --danger: #ff3b30; 
+    --text: #1c1c1e; 
+    --text-secondary: #8e8e93;
+    --border: #d1d1d6;
+    --card-bg: #ffffff;
+    --nav-bg: #ffffff;
+    --shadow: 0 2px 10px rgba(0,0,0,0.08);
+    --shadow-lg: 0 4px 20px rgba(0,0,0,0.12);
+    
+    /* iOS safe area support */
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
+}
+
+* { 
+    box-sizing: border-box;
+    -webkit-overflow-scrolling: touch;
+}
+
+body, html { 
+    margin: 0; 
+    padding: 0; 
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: var(--bg); 
+    color: var(--text);
+    height: 100%; 
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: rgba(0, 122, 255, 0.1);
+    -webkit-text-size-adjust: 100%;
+}
+
+/* Card styles */
+.card {
+    background: var(--card-bg);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow);
+}
+
+/* Button styles */
+.btn {
+    padding: 12px 24px;
+    border-radius: 12px;
+    border: none;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-primary {
+    background: var(--primary);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: var(--primary-hover);
+}
+
+.btn-danger {
+    background: var(--danger);
+    color: white;
+}
+
+.btn-success {
+    background: var(--success);
+    color: white;
+}
+
+/* Form inputs */
+input, select, textarea {
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    font-size: 15px;
+    width: 100%;
+    font-family: inherit;
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+/* Loading spinner */
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading::after {
+    content: '';
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    margin-left: 8px;
+}
+
+/* Global Page Loader */
+.loader {
+  margin: 40px auto;
+  width: 40px;
+  height: 40px;
+  border: 4px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}

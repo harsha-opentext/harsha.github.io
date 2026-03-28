@@ -1,0 +1,112 @@
+<div class="settings-container">
+  <div class="card">
+    <h2>⚙️ Settings</h2>
+    
+    <form (ngSubmit)="saveSettings()">
+      <div class="settings-section">
+        <h3>GitHub Configuration</h3>
+        <p class="section-description">
+          Configure your GitHub Personal Access Token and repository to enable data synchronization.
+        </p>
+        
+        <div class="form-group">
+          <label for="githubToken">GitHub Personal Access Token</label>
+          <input
+            id="githubToken"
+            type="password"
+            [(ngModel)]="githubToken"
+            name="githubToken"
+            placeholder="ghp_xxxxxxxxxxxx"
+            required
+          />
+          <small>Generate a token at <a href="https://github.com/settings/tokens" target="_blank">GitHub Settings</a> with <code>repo</code> scope.</small>
+        </div>
+        
+        <div class="form-group">
+          <label for="githubRepo">GitHub Repository</label>
+          <input
+            id="githubRepo"
+            type="text"
+            [(ngModel)]="githubRepo"
+            name="githubRepo"
+            placeholder="username/repo-name"
+            required
+          />
+          <small>Format: owner/repository (e.g., john/my-data)</small>
+        </div>
+      </div>
+      
+      <div class="settings-section">
+        <h3>Application Settings</h3>
+        
+        <div class="form-group">
+          <label for="dailyBudget">Daily Calorie Budget (kcal)</label>
+          <input
+            id="dailyBudget"
+            type="number"
+            [(ngModel)]="dailyBudget"
+            name="dailyBudget"
+            min="0"
+            step="100"
+          />
+        </div>
+        
+        <div class="form-group">
+          <label for="timeFormat">Time Format</label>
+          <select
+            id="timeFormat"
+            [(ngModel)]="timeFormat"
+            name="timeFormat"
+          >
+            <option value="12h">12-hour (AM/PM)</option>
+            <option value="24h">24-hour</option>
+          </select>
+          <small>Choose how times are displayed throughout the app.</small>
+        </div>
+        
+        <div class="form-group">
+          <label for="dataFolder">Data Folder</label>
+          <input
+            id="dataFolder"
+            type="text"
+            [(ngModel)]="dataFolder"
+            name="dataFolder"
+            placeholder="data"
+          />
+          <small>Folder in your repository where per-day JSON files will be stored.</small>
+        </div>
+        
+        <div class="form-group">
+          <label for="logRetention">Log Retention (minutes)</label>
+          <input
+            id="logRetention"
+            type="number"
+            [(ngModel)]="logRetentionMinutes"
+            name="logRetention"
+            min="1"
+            max="60"
+          />
+        </div>
+      </div>
+      
+      <div class="button-group">
+        <button type="submit" class="btn btn-primary" [class.saved]="saved">
+          {{ saved ? '✓ Saved!' : 'Save Settings' }}
+        </button>
+        <button type="button" class="btn btn-danger" (click)="resetSettings()">
+          Reset to Defaults
+        </button>
+      </div>
+    </form>
+  </div>
+  
+  <div class="card info-card">
+    <h3>ℹ️ How It Works</h3>
+    <ul>
+      <li>Your data is stored in your own GitHub repository</li>
+      <li>Each day's entries are saved in a separate JSON file</li>
+      <li>All credentials are stored locally in your browser</li>
+      <li>No backend server is used - everything runs client-side</li>
+    </ul>
+  </div>
+</div>

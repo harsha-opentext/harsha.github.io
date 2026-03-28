@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Body Measurements — Settings</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script src="storage.js"></script>
+  <script src="ui.js"></script>
+  <script src="app.js"></script>
+</head>
+<body>
+  <nav class="bm-header">
+    <div style="font-weight:700">🔐 Settings</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="icon-btn" onclick="window.location.href='index.html'">← Back</button>
+    </div>
+  </nav>
+
+  <div class="bm-content">
+    <div class="bm-form">
+      <label>Personal Access Token</label>
+      <input id="bm-cfg-token" type="password" placeholder="ghp_...">
+      <label>Repository Path</label>
+      <input id="bm-cfg-repo" type="text" placeholder="username/repo-name">
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
+        <button id="bm-save-settings" class="btn-primary">💾 Save</button>
+        <button id="bm-cancel-settings" class="btn-secondary" onclick="window.location.href='index.html'">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="bottom-nav tracker-nav">
+    <div class="nav-links">
+      <button type="button" class="nav-btn nav-apps-btn" onclick="window.location.href='../index.html'">
+        <span class="icon">←</span><span class="label">Apps</span>
+      </button>
+      <button type="button" class="nav-btn" onclick="window.location.href='index.html'">
+        <span class="icon">⚖️</span><span class="label">Measure</span>
+      </button>
+      <button type="button" class="nav-btn" onclick="window.location.href='history.html'">
+        <span class="icon">📜</span><span class="label">History</span>
+      </button>
+      <button type="button" class="nav-btn active">
+        <span class="icon">⚙️</span><span class="label">Settings</span>
+      </button>
+      <button type="button" class="nav-btn" onclick="bm_toggleLogs()">
+        <span class="icon">🔍</span><span class="label">Logs</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Log Panel -->
+  <div id="log-panel" aria-hidden="true" class="bm-log-panel">
+    <div class="bm-log-header">
+      <div style="font-weight:700">Logs</div>
+      <div style="display:flex;gap:8px"><button class="btn-secondary" onclick="document.getElementById('log-panel').setAttribute('aria-hidden','true')">Close</button></div>
+    </div>
+    <div id="bm-log-list" class="bm-log-list"></div>
+  </div>
+
+</body>
+</html>
