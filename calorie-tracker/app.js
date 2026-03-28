@@ -21,6 +21,8 @@ let state = {
 
 // Track which history date-sets we've attempted to prefetch to avoid fetch loops
 state.historyPrefetchAttempts = new Set();
+// Track which history date-sets we've already notified as served from local cache
+state.historyCacheNotified = new Set();
 
 const LOG_LEVELS = {
     debug: 0,
@@ -1115,7 +1117,8 @@ function saveSettings() {
     
     dbg("Settings saved");
     toggleSettings();
-    fetchFromGit();
+    // After saving settings, only fetch today's per-day file — never perform a full-folder fetch.
+    fetchFromGit(true).catch(err => dbg(`fetchFromGit(today) after saving settings failed: ${err && err.message}`, 'warn'));
 }
 
 function updateAutoSaveUI() {
@@ -1185,6 +1188,14 @@ async function fetchFromGit(onlyToday = false) {
         try { showPage('settings'); } catch (e) { /* ignore */ }
         return;
     }
+    // Enforce policy: do NOT allow full-folder listing/fetches.
+    // Only per-day fetches (today or explicit per-date helpers) are permitted.
+    if (!onlyToday) {
+        dbg('fetchFromGit: full-folder fetch disabled by policy; aborting.', 'error');
+        try { showNotification('Full-folder fetch disabled by policy; aborting.', 'error'); } catch (e) {}
+        // Fail early so callers can handle the rejection explicitly.
+        throw new Error('Full-folder fetch disabled by policy');
+    }
 
     let activeBtn = null;
     try {
@@ -1223,7 +1234,7 @@ async function fetchFromGit(onlyToday = false) {
                     arr = arr.map(e => ({ ...(e || {}), _sourceDate: today }));
                     state.fileIndex[today] = j.sha;
                     state.entries = arr;
-                    try { showNotification(`Fetched ${arr.length} entries for ${today}`, 'read'); } catch (e) {}
+                    try { showNotification(`Fetched 1 file (${arr.length} entries) for ${today}`, 'read'); } catch (e) {}
                     render();
                     renderHistory();
                     dbg(`Loaded ${arr.length} entries from ${filePath}`, 'info');
@@ -1308,7 +1319,7 @@ async function fetchFromGit(onlyToday = false) {
                 }
 
                 state.entries = merged;
-                try { showNotification(`Fetched ${state.entries.length} entries from GitHub`, 'read'); } catch (e) {}
+                try { showNotification(`Fetched ${toFetch.length} files (${state.entries.length} entries) from GitHub`, 'read'); } catch (e) {}
                 render();
                 renderHistory();
                 dbg(`Successfully loaded ${state.entries.length} entries from ${toFetch.length} files`, 'info');
@@ -2086,56 +2097,153 @@ function ensureHistoryPrefetchIfNeeded() {
             }
 
             const hasAll = targets.every(td => state.entries.some(e => getEntryDate(e) === td));
+            // If all requested dates are already present locally, notify once and skip network fetch
+            if (hasAll) {
+                try {
+                    const key = targets.join(',');
+                    if (!state.historyCacheNotified.has(key)) {
+                        state.historyCacheNotified.add(key);
+                        const entriesForTargets = state.entries.filter(e => targets.includes(getEntryDate(e)));
+                        try { showNotification(`History: ${targets.length} date(s) served from local cache (${entriesForTargets.length} entries) — no GitHub fetch performed`, 'read'); } catch (e) {}
+                    }
+                } catch (e) { dbg(`history cache notification error: ${e && e.message ? e.message : String(e)}`, 'error'); }
+                return false;
+            }
+
             if (!hasAll) {
                 const key = targets.join(',');
                 if (!state.historyPrefetchAttempts.has(key)) {
                     state.historyPrefetchAttempts.add(key);
                     state.historyFetchInProgress = true;
-                    // If only one date requested, fetch that single date file instead of the whole folder
-                    if (targets.length === 1) {
-                        const dateToFetch = targets[0];
-                        dbg(`History requested date ${dateToFetch} not loaded; fetching single date file`, 'info');
-                        fetchDateFromGit(dateToFetch).then(res => {
-                            state.historyFetchInProgress = false;
-                            if (res && res.status === 200 && Array.isArray(res.entries)) {
-                                // Merge entries for this date (avoid duplicates)
-                                const existingKeys = new Set(state.entries.map(e => JSON.stringify(e)));
-                                res.entries.forEach(en => { if (!existingKeys.has(JSON.stringify(en))) state.entries.push(en); });
-                                renderHistory();
-                            } else if (res && res.status === 404) {
-                                dbg(`History: ${dateToFetch} not found on GitHub (404).`, 'info');
-                                renderHistory();
-                            } else {
-                                dbg(`History single-date fetch returned status=${res && res.status}`, 'warn');
-                                // fallback to full folder fetch once
+                    // Compute missing dates early so we can provide immediate UI feedback
+                    const missing = targets.filter(td => !state.entries.some(e => getEntryDate(e) === td));
+                    try { document.body.__historyLoadingFlag = true; renderHistory(); } catch (e) {}
+                    try { showNotification(`Fetching ${missing.length} date(s) from GitHub...`, 'read'); } catch (e) {}
+                        // If only one date requested, fetch that single date file; otherwise
+                        // fetch only the missing per-day files for the requested range in
+                        // small chunks to avoid fetching the entire folder (which may be large).
+                        if (targets.length === 1) {
+                            const dateToFetch = missing[0] || targets[0];
+                            dbg(`History requested date ${dateToFetch} not loaded; fetching single date file`, 'info');
+                            fetchDateFromGit(dateToFetch).then(res => {
+                                // Clear transient loading flag and update state
+                                try { document.body.__historyLoadingFlag = false; } catch (e) {}
+                                state.historyFetchInProgress = false;
+                                if (res && res.status === 200 && Array.isArray(res.entries)) {
+                                    // Merge entries for this date (avoid duplicates)
+                                    const existingKeys = new Set(state.entries.map(e => JSON.stringify(e)));
+                                    res.entries.forEach(en => { if (!existingKeys.has(JSON.stringify(en))) state.entries.push(en); });
+                                    renderHistory();
+                                } else if (res && res.status === 404) {
+                                    dbg(`History: ${dateToFetch} not found on GitHub (404).`, 'info');
+                                    renderHistory();
+                                } else {
+                                    dbg(`History single-date fetch returned status=${res && res.status}`, 'warn');
+                                    // Full-folder fallback disabled by policy.
+                                    if (!state.historyFetchFallbackAttempted) {
+                                        state.historyFetchFallbackAttempted = true;
+                                        dbg('History: full-folder fetch disabled by policy; aborting fallback', 'info');
+                                        try { showNotification('History per-date fetch failed; full-folder fallback is disabled.', 'warn'); } catch (e) {}
+                                        renderHistory();
+                                    } else {
+                                        renderHistory();
+                                    }
+                                }
+                            }).catch(err => {
+                                try { document.body.__historyLoadingFlag = false; } catch (e) {}
+                                state.historyFetchInProgress = false;
+                                dbg(`Failed to fetch single date file for history: ${err && err.message ? err.message : String(err)}`, 'error');
                                 if (!state.historyFetchFallbackAttempted) {
                                     state.historyFetchFallbackAttempted = true;
-                                    dbg('History: falling back to full-folder fetch after single-date fetch failure', 'info');
-                                    fetchFromGit(false).then(() => { renderHistory(); }).catch(err => dbg(`Failed to fetch full data folder for history fallback: ${err && err.message ? err.message : String(err)}`, 'error'));
+                                    try { showNotification('History per-date fetch failed; full-folder fallback is disabled.', 'warn'); } catch (e) {}
+                                    renderHistory();
                                 } else {
                                     renderHistory();
                                 }
-                            }
-                        }).catch(err => {
-                            state.historyFetchInProgress = false;
-                            dbg(`Failed to fetch single date file for history: ${err && err.message ? err.message : String(err)}`, 'error');
-                            if (!state.historyFetchFallbackAttempted) {
-                                state.historyFetchFallbackAttempted = true;
-                                fetchFromGit(false).then(() => { renderHistory(); }).catch(err2 => dbg(`Failed fallback full-folder fetch: ${err2 && err2.message ? err2.message : String(err2)}`, 'error'));
-                            } else {
-                                renderHistory();
-                            }
-                        });
-                    } else {
-                        dbg(`History requested dates [${targets.join(',')}] not loaded; fetching full data folder`, 'info');
-                        fetchFromGit(false).then(() => {
-                            state.historyFetchInProgress = false;
-                            renderHistory();
-                        }).catch(err => {
-                            state.historyFetchInProgress = false;
-                            dbg(`Failed to fetch full data folder for history: ${err && err.message ? err.message : String(err)}`, 'error');
-                        });
-                    }
+                            });
+                        } else {
+                            dbg(`History requested dates [${targets.join(',')}] not loaded; fetching missing per-day files`, 'info');
+                            // `missing` already computed above
+                            const CHUNK = 5;
+                            (async () => {
+                                // Track how many files/entries we actually merged into local state
+                                let filesFetched = 0;
+                                let entriesFetched = 0;
+                                try {
+                                    for (let i = 0; i < missing.length; i += CHUNK) {
+                                        const chunk = missing.slice(i, i + CHUNK);
+                                        dbg(`Fetching chunk ${i / CHUNK + 1} for history: ${chunk.join(', ')}`, 'debug');
+                                        const promises = chunk.map(async (dateStr) => {
+                                            try {
+                                                const res = await fetchDateFromGit(dateStr);
+                                                if (res && res.status === 200 && Array.isArray(res.entries)) {
+                                                    // Merge entries for this date (avoid duplicates) and count merged entries
+                                                    const existingKeys = new Set(state.entries.map(e => JSON.stringify(e)));
+                                                    let mergedCount = 0;
+                                                    res.entries.forEach(en => {
+                                                        try {
+                                                            const key = JSON.stringify(en);
+                                                            if (!existingKeys.has(key)) {
+                                                                state.entries.push(en);
+                                                                existingKeys.add(key);
+                                                                mergedCount++;
+                                                            }
+                                                        } catch (e) {
+                                                            // If stringify fails, still push to avoid data loss
+                                                            state.entries.push(en);
+                                                            mergedCount++;
+                                                        }
+                                                    });
+                                                    // Record that we fetched a real file and how many entries were merged
+                                                    return { date: dateStr, ok: true, status: res.status, entriesCount: mergedCount };
+                                                } else if (res && res.status === 404) {
+                                                    dbg(`History: ${dateStr} not found on GitHub (404).`, 'info');
+                                                    return { date: dateStr, ok: true, status: 404, entriesCount: 0 };
+                                                } else {
+                                                    dbg(`fetchDateFromGit returned status ${res && res.status} for ${dateStr}`, 'warn');
+                                                    return { date: dateStr, ok: false, status: res && res.status || 0, entriesCount: 0 };
+                                                }
+                                            } catch (err) {
+                                                dbg(`Error fetching ${dateStr}: ${err && err.message}`, 'error');
+                                                return { date: dateStr, ok: false, status: 0, entriesCount: 0 };
+                                            }
+                                        });
+                                        const results = await Promise.all(promises);
+                                        // Update counters from this chunk
+                                        results.forEach(r => {
+                                            if (r && r.ok && r.status === 200) {
+                                                filesFetched += 1;
+                                                entriesFetched += (r.entriesCount || 0);
+                                            }
+                                        });
+
+                                        const anyFailed = results.some(r => !r.ok);
+                                        if (anyFailed) {
+                                            dbg('One or more per-date fetches failed; full-folder fallback disabled by policy', 'warn');
+                                            if (!state.historyFetchFallbackAttempted) {
+                                                state.historyFetchFallbackAttempted = true;
+                                                try { showNotification('One or more per-day fetches failed; full-folder fallback is disabled.', 'warn'); } catch (e) {}
+                                                break;
+                                            }
+                                        }
+                                    }
+                                } catch (err) {
+                                    dbg(`Error during per-day fetch loop: ${err && err.message}`, 'error');
+                                } finally {
+                                    state.historyFetchInProgress = false;
+                                    try {
+                                        const cachedCount = Math.max(0, (targets ? targets.length : 0) - (missing ? missing.length : 0));
+                                        if (cachedCount > 0) {
+                                            showNotification(`Fetched ${filesFetched} files (${entriesFetched} entries); ${cachedCount} date(s) served from local cache`, 'read');
+                                        } else {
+                                            showNotification(`Fetched ${filesFetched} files (${entriesFetched} entries) for requested dates`, 'read');
+                                        }
+                                    } catch (e) {}
+                                    try { document.body.__historyLoadingFlag = false; } catch (e) {}
+                                    renderHistory();
+                                }
+                            })();
+                        }
                     return true; // fetch kicked off
                 } else {
                     dbg(`Already attempted prefetch for [${key}] — skipping additional fetch to avoid loop`, 'warn');
@@ -2237,45 +2345,64 @@ function renderHistory() {
     // Sync date-range from UI controls so returning to the page reflects
     // the dropdown/input selection (prevents visual selection without state match).
     try {
-        const rangeSel = document.getElementById('range-select');
-        if (rangeSel) {
-            const v = rangeSel.value;
-            const today = getTodayString();
-            let newStart = null;
-            let newEnd = null;
-            if (!v || v === 'all') {
-                newStart = null; newEnd = null;
-            } else if (v === 'today') {
-                newStart = today; newEnd = today;
-            } else if (v === 'yesterday') {
-                newStart = addDaysToDateString(today, -1);
-                newEnd = newStart;
-            } else {
-                const days = parseInt(v, 10);
-                if (!isNaN(days)) {
-                    newStart = addDaysToDateString(today, -(days - 1));
-                    newEnd = today;
+        // Only sync the quick-range dropdown when the user is not actively
+        // using the calendar picker — calendar selection should take precedence.
+        if (!state.historyUsingCalendar) {
+            const rangeSel = document.getElementById('range-select');
+            if (rangeSel) {
+                const v = rangeSel.value;
+                const today = getTodayString();
+                let newStart = null;
+                let newEnd = null;
+                if (!v || v === 'all') {
+                    newStart = null; newEnd = null;
+                } else if (v === 'today') {
+                    newStart = today; newEnd = today;
+                } else if (v === 'yesterday') {
+                    newStart = addDaysToDateString(today, -1);
+                    newEnd = newStart;
+                } else {
+                    const days = parseInt(v, 10);
+                    if (!isNaN(days)) {
+                        newStart = addDaysToDateString(today, -(days - 1));
+                        newEnd = today;
+                    }
                 }
-            }
-            if (newStart !== state.dateRangeStart || newEnd !== state.dateRangeEnd) {
-                state.dateRangeStart = newStart;
-                state.dateRangeEnd = newEnd;
-                state.historyPage = 1;
+                if (newStart !== state.dateRangeStart || newEnd !== state.dateRangeEnd) {
+                    state.dateRangeStart = newStart;
+                    state.dateRangeEnd = newEnd;
+                    state.historyPage = 1;
+                }
             }
         }
     } catch (e) { dbg(`renderHistory sync error: ${e && e.message ? e.message : String(e)}`, 'error'); }
 
-    // If a prefetch was initiated, the helper already kicked off a fetch and will recall renderHistory when done.
-    if (ensureHistoryPrefetchIfNeeded()) {
-        return;
-    }
+    // Kick off any needed prefetch for missing per-day files, but still
+    // render the currently-loaded entries immediately so the user sees
+    // the filtered results without waiting for network I/O.
+    try { ensureHistoryPrefetchIfNeeded(); } catch (e) { dbg(`prefetch helper error: ${e && e.message}`, 'warn'); }
 
     const filtered = computeFilteredEntries();
     buildHistoryStats(filtered);
 
     container.innerHTML = '';
+    // Small debug info to help verify which filter is active and how many
+    // entries are displayed. This is intentionally minimal and useful while
+    // developing; it can be removed later.
+    try {
+        const dbgId = 'history-debug-info';
+        let dbgEl = document.getElementById(dbgId);
+        if (!dbgEl) {
+            dbgEl = document.createElement('div');
+            dbgEl.id = dbgId;
+            dbgEl.style.cssText = 'font-size:13px; color:var(--text-secondary); padding:6px 0;';
+            container.appendChild(dbgEl);
+        }
+        dbgEl.textContent = `Filter: ${state.dateRangeStart || '-'} → ${state.dateRangeEnd || '-'} — showing ${0} entries (of ${state.entries.length})`;
+    } catch (e) { /* ignore debug UI errors */ }
     if (filtered.length === 0) {
         container.innerHTML = '<div style="padding:20px; color:var(--text-secondary);">No entries found for the selected filters.</div>';
+        try { const dbgEl = document.getElementById('history-debug-info'); if (dbgEl) dbgEl.textContent = `Filter: ${state.dateRangeStart || '-'} → ${state.dateRangeEnd || '-'} — showing 0 entries (of ${state.entries.length})`; } catch (e) {}
         return;
     }
 
@@ -2311,6 +2438,7 @@ function renderHistory() {
         });
     });
     dbg('renderHistory complete', 'debug');
+    try { const dbgEl = document.getElementById('history-debug-info'); if (dbgEl) dbgEl.textContent = `Filter: ${state.dateRangeStart || '-'} → ${state.dateRangeEnd || '-'} — showing ${filtered.length} entries (of ${state.entries.length})`; } catch (e) {}
     try { hideHistoryLoading(); document.body.__historyLoadingFlag = false; } catch (e) { /* ignore */ }
 }
 
@@ -2343,6 +2471,20 @@ function computeFilteredEntries() {
                 return ed && ed >= state.dateRangeStart && ed <= state.dateRangeEnd;
             });
         }
+        // Additional debug: report how many entries fall into the requested
+        // date range vs how many have unknown/mismatched dates. Helpful when
+        // entries exist but aren't being matched due to date parsing differences.
+        try {
+            const total = (Array.isArray(state.entries) ? state.entries.length : 0);
+            const matched = (Array.isArray(filtered) ? filtered.length : 0);
+            const unknown = Array.isArray(state.entries) ? state.entries.reduce((acc, e) => acc + (getEntryDate(e) ? 0 : 1), 0) : 0;
+            dbg(`computeFilteredEntries debug: total=${total} matched=${matched} unknownDates=${unknown}`, 'debug');
+            // Also log a small sample of distinct dates present in entries
+            const dateSet = new Set();
+            if (Array.isArray(state.entries)) state.entries.forEach(e => { const d = getEntryDate(e); if (d) dateSet.add(d); });
+            const sampleDates = Array.from(dateSet).sort().slice(0, 12).join(', ');
+            dbg(`computeFilteredEntries distinctDatesSample: ${sampleDates}`, 'debug');
+        } catch (e) { /* ignore debug errors */ }
     }
 
     if (foodFilter) filtered = filtered.filter(e => e.food?.toLowerCase().includes(foodFilter));
@@ -2424,6 +2566,8 @@ function addDaysToDateString(dateStr, days) {
 function handleRangeSelect() {
     const sel = document.getElementById('range-select');
     if (!sel) return;
+    // When the user picks a quick range, prefer that over any active calendar selection
+    state.historyUsingCalendar = false;
     const v = sel.value;
     const today = getTodayString();
 
@@ -2447,52 +2591,113 @@ function handleRangeSelect() {
     state.historyPage = 1;
     // Indicate loading while history range is being refreshed
     try { document.body.__historyLoadingFlag = true; } catch (e) { /* ignore */ }
+    // Clear any start/end inputs to reflect dropdown selection
+    try { const s = document.getElementById('filter-date-start'); if (s) s.value = ''; const e = document.getElementById('filter-date-end'); if (e) e.value = ''; } catch (e) {}
+    try { updateApplyButtonState(); } catch (e) {}
     renderHistory();
 }
 
-function handleDateSelection() {
-    const dateInput = document.getElementById('filter-date');
-    const selectedDate = dateInput.value;
-    
-    if (!selectedDate) {
+function handleStartDateChange() {
+    const startInput = document.getElementById('filter-date-start');
+    if (!startInput) return;
+    const selected = startInput.value;
+    if (!selected) {
         state.dateRangeStart = null;
-        state.dateRangeEnd = null;
-        dateInput.setAttribute('placeholder', 'dd/mm/yyyy');
+        if (!(document.getElementById('filter-date-end')?.value)) state.historyUsingCalendar = false;
+        startInput.setAttribute('placeholder', 'Start');
         return;
     }
-    
-    // If no start date, set it and keep calendar open
-    if (!state.dateRangeStart) {
-        state.dateRangeStart = selectedDate;
-        dateInput.value = '';
-        dateInput.setAttribute('placeholder', `Start: ${selectedDate} — pick end or click again for single day`);
-        dbg(`Date range start: ${selectedDate}`, 'debug');
-        // Keep calendar open by preventing blur and refocusing
-        setTimeout(() => {
-            dateInput.showPicker();
-        }, 0);
+    state.dateRangeStart = selected;
+    state.historyUsingCalendar = true;
+    // Do not auto-apply; wait for user to click Apply to trigger filtering.
+    try { updateApplyButtonState(); } catch (e) {}
+}
+
+function handleEndDateChange() {
+    const endInput = document.getElementById('filter-date-end');
+    if (!endInput) return;
+    const selected = endInput.value;
+    if (!selected) {
+        state.dateRangeEnd = null;
+        if (!(document.getElementById('filter-date-start')?.value)) state.historyUsingCalendar = false;
+        endInput.setAttribute('placeholder', 'End');
+        return;
     }
-    // If clicking same date, it's single day and close
-    else if (state.dateRangeStart === selectedDate) {
-        state.dateRangeEnd = selectedDate;
-        dateInput.value = '';
-        dateInput.setAttribute('placeholder', `Single day: ${selectedDate}`);
-        dbg(`Single day selected: ${selectedDate}`, 'debug');
-        renderHistory();
-        // Calendar will close naturally
+    state.dateRangeEnd = selected;
+    state.historyUsingCalendar = true;
+    // Do not auto-apply; wait for user to click Apply to trigger filtering.
+    try { updateApplyButtonState(); } catch (e) {}
+}
+
+function applyDateRange() {
+    // Read current inputs
+    const startInput = document.getElementById('filter-date-start');
+    const endInput = document.getElementById('filter-date-end');
+    const start = startInput?.value || null;
+    const end = endInput?.value || null;
+
+    if (!start && !end) {
+        // Nothing selected — clear filters
+        clearFilters();
+        return;
     }
-    // Different date = range and close
-    else {
-        state.dateRangeEnd = selectedDate;
-        // Ensure start is before end
-        if (state.dateRangeStart > state.dateRangeEnd) {
-            [state.dateRangeStart, state.dateRangeEnd] = [state.dateRangeEnd, state.dateRangeStart];
+
+    // If only one side provided, treat as single-day selection
+    let s = start || end;
+    let e = end || start;
+    if (!s) s = e;
+    if (!e) e = s;
+
+    // Normalize order
+    if (s > e) [s, e] = [e, s];
+
+    state.dateRangeStart = s;
+    state.dateRangeEnd = e;
+    state.historyUsingCalendar = true;
+    state.historyPage = 1;
+
+    // Clear quick-range dropdown to avoid sync conflicts
+    try { const rs = document.getElementById('range-select'); if (rs) rs.value = ''; } catch (e) {}
+
+    // Show loading overlay while prefetch may occur
+    try { document.body.__historyLoadingFlag = true; } catch (e) {}
+
+    dbg(`applyDateRange: start=${state.dateRangeStart} end=${state.dateRangeEnd}`, 'debug');
+
+    // If we previously attempted a prefetch for the same exact date list,
+    // remove that key so the user forcing an Apply will re-attempt fetching.
+    try {
+        const targets = [];
+        let cur = new Date(state.dateRangeStart);
+        const endD = new Date(state.dateRangeEnd);
+        while (cur <= endD) {
+            targets.push(formatDateLocal(cur));
+            cur.setDate(cur.getDate() + 1);
         }
-        dateInput.value = '';
-        dateInput.setAttribute('placeholder', `${state.dateRangeStart} → ${state.dateRangeEnd}`);
-        dbg(`Date range: ${state.dateRangeStart} to ${state.dateRangeEnd}`, 'debug');
-        renderHistory();
-        // Calendar will close naturally
+        const key = targets.join(',');
+        if (key && state.historyPrefetchAttempts && state.historyPrefetchAttempts.has(key)) {
+            dbg(`applyDateRange: clearing previous prefetch attempt key ${key}`, 'debug');
+            state.historyPrefetchAttempts.delete(key);
+            state.historyFetchFallbackAttempted = false;
+        }
+    } catch (e) { dbg(`applyDateRange prefetch-key cleanup error: ${e && e.message}`, 'warn'); }
+
+    // Kick off prefetch if needed but render immediately so user sees results.
+    try { ensureHistoryPrefetchIfNeeded(); } catch (e) { dbg(`applyDateRange prefetch error: ${e && e.message}`, 'warn'); }
+    try { showNotification(`Showing ${state.dateRangeStart} → ${state.dateRangeEnd}`, 'read'); } catch (e) {}
+    renderHistory();
+}
+
+function updateApplyButtonState() {
+    const btn = document.getElementById('apply-date-range-btn');
+    if (!btn) return;
+    const startVal = document.getElementById('filter-date-start')?.value;
+    const endVal = document.getElementById('filter-date-end')?.value;
+    // Button enabled only when both start and end are provided
+    if (startVal && endVal) {
+        btn.disabled = false;
+    } else {
+        btn.disabled = true;
     }
 }
 
@@ -2502,13 +2707,18 @@ function filterHistory() {
 }
 
 function clearFilters() {
-    const dateInput = document.getElementById('filter-date');
-    dateInput.value = '';
-    dateInput.setAttribute('placeholder', 'Select date');
-    document.getElementById('filter-food').value = '';
+    const start = document.getElementById('filter-date-start');
+    const end = document.getElementById('filter-date-end');
+    if (start) { start.value = ''; start.setAttribute('placeholder', 'Start'); }
+    if (end) { end.value = ''; end.setAttribute('placeholder', 'End'); }
+    const food = document.getElementById('filter-food');
+    if (food) food.value = '';
     state.dateRangeStart = null;
     state.dateRangeEnd = null;
+    state.historyUsingCalendar = false;
+    try { const rs = document.getElementById('range-select'); if (rs) rs.value = ''; } catch (e) {}
     state.historyPage = 1;
+    try { updateApplyButtonState(); } catch (e) {}
     renderHistory();
 }
 
@@ -2904,8 +3114,8 @@ async function renderAnalytics(date) {
                     // Fallback to a single full-folder fetch once
                     if (!state._analytics_fetchAttempted) {
                         state._analytics_fetchAttempted = true;
-                        dbg('Analytics: falling back to full-folder fetch due to fetchDateFromGit error', 'info');
-                        await fetchFromGit(false).catch(err => dbg(`Analytics fetchFromGit failed: ${err && err.message}`, 'error'));
+                        dbg('Analytics: full-folder fetch disabled by policy; skipping fallback', 'info');
+                        try { showNotification('Analytics per-date fetch failed; full-folder fallback is disabled.', 'warn'); } catch (e) {}
                         entriesForAnalytics = state.entries || [];
                     } else {
                         entriesForAnalytics = [];
@@ -2916,7 +3126,7 @@ async function renderAnalytics(date) {
                 // Fallback to folder fetch once
                 if (!state._analytics_fetchAttempted) {
                     state._analytics_fetchAttempted = true;
-                    await fetchFromGit(false).catch(err => dbg(`Analytics fetchFromGit failed: ${err && err.message}`, 'error'));
+                    try { showNotification('Analytics per-date fetch failed; full-folder fallback is disabled.', 'warn'); } catch (e) {}
                     entriesForAnalytics = state.entries || [];
                 } else {
                     entriesForAnalytics = [];
@@ -3343,9 +3553,12 @@ window.onload = async () => {
         }
     }
     
-    // Initialize date input placeholder
-    const dateInputInit = document.getElementById('filter-date');
-    if (dateInputInit) dateInputInit.setAttribute('placeholder', 'dd/mm/yyyy');
+    // Initialize date input placeholders (start/end)
+    const startInit = document.getElementById('filter-date-start');
+    if (startInit) startInit.setAttribute('placeholder', 'Start');
+    const endInit = document.getElementById('filter-date-end');
+    if (endInit) endInit.setAttribute('placeholder', 'End');
+    try { updateApplyButtonState(); } catch (e) {}
 
     // Ensure date button and tracker render initialize even if no fetch occurs
     try {

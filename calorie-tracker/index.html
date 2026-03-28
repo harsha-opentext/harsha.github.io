@@ -109,7 +109,6 @@
         <div class="page-header">
             <h1>Entry History</h1>
             <div class="header-actions">
-                <button class="btn-secondary" onclick="fetchFromGit()" style="padding: 10px 16px; font-size: 14px;">⬇️ Fetch Data</button>
                 <div style="display: flex; flex-direction: column; gap: 4px;">
                     <div style="display:flex; align-items:center; gap:8px;">
                         <select id="range-select" class="date-filter" onchange="handleRangeSelect()" style="padding: 8px;">
@@ -121,6 +120,10 @@
                             <option value="90">Last 90 days</option>
                             <option value="all">All time</option>
                         </select>
+                        <input type="date" id="filter-date-start" class="date-filter" onchange="handleStartDateChange()" placeholder="Start" style="padding:8px; margin-left:8px;">
+                        <input type="date" id="filter-date-end" class="date-filter" onchange="handleEndDateChange()" placeholder="End" style="padding:8px; margin-left:4px;">
+                        <button type="button" id="apply-date-range-btn" class="btn-primary" onclick="applyDateRange()" style="padding:8px; margin-left:6px; min-width:84px;">Apply</button>
+                        <button type="button" class="btn-secondary" onclick="clearFilters()" style="padding:8px; margin-left:6px; min-width:84px;">Clear</button>
                     </div>
                 </div>
                 <input type="text" id="filter-food" class="date-filter" placeholder="Search food..." oninput="filterHistory()" style="width: 150px;">
@@ -228,7 +231,6 @@
 
         <div class="settings-section">
             <h3>🔄 Data Management</h3>
-            <button class="btn-secondary" onclick="fetchFromGit()">⬇️ Fetch from GitHub</button>
             <button class="btn-danger" onclick="clearAllData()">🗑️ Clear Local Data</button>
         </div>
 
