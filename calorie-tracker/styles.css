@@ -375,6 +375,14 @@ button.loading::after {
     animation: blobAnimation 1.4s infinite;
 }
 
+/* Disabled button appearance */
+button[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+    transform: none;
+}
+
 @keyframes blobAnimation {
     0%, 80%, 100% { 
         box-shadow: 
