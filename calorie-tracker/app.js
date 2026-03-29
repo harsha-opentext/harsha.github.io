@@ -754,6 +754,9 @@ function showPage(p) {
         const schemaEl = document.getElementById('settings-schema');
         if (dataFileEl) dataFileEl.innerText = `${getConfig('dataFolder')}/<YYYY-MM-DD>.json`;
         if (schemaEl) schemaEl.innerText = state.schema ? state.schema.displayName : 'Loading...';
+        // Sync theme selector with current preference
+        const themeSel = document.getElementById('theme-mode');
+        if (themeSel) themeSel.value = localStorage.getItem('gt_theme') || 'auto';
     }
     // Ensure the newly shown page renders its latest state immediately
     try { render(); } catch (e) { dbg(`showPage render error: ${e && e.message ? e.message : String(e)}`, 'error'); }
@@ -3679,7 +3682,45 @@ async function copyCsvToClipboard() {
     }
 }
 
+// ── Theme management ──────────────────────────────────────────────────────────
+function applyTheme(mode) {
+    const html = document.documentElement;
+    if (mode === 'dark') {
+        html.setAttribute('data-theme', 'dark');
+    } else if (mode === 'light') {
+        html.setAttribute('data-theme', 'light');
+    } else {
+        html.removeAttribute('data-theme');
+    }
+    // Update the non-media theme-color meta so Safari toolbar matches
+    const meta = document.getElementById('theme-color-meta');
+    if (meta) {
+        const isDark = mode === 'dark' ||
+            (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        meta.content = isDark ? '#000000' : '#ffffff';
+    }
+}
+
+function setTheme(mode) {
+    localStorage.setItem('gt_theme', mode);
+    applyTheme(mode);
+}
+
+function initTheme() {
+    const saved = localStorage.getItem('gt_theme') || 'auto';
+    applyTheme(saved);
+    const sel = document.getElementById('theme-mode');
+    if (sel) sel.value = saved;
+    // Reapply when system preference changes (only matters in auto mode)
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+        const current = localStorage.getItem('gt_theme') || 'auto';
+        if (current === 'auto') applyTheme('auto');
+    });
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 window.onload = async () => {
+    initTheme();
     const t = localStorage.getItem('gt_token');
     const r = localStorage.getItem('gt_repo');
     if (t) document.getElementById('cfg-token').value = t;

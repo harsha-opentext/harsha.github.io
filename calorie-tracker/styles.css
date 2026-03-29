@@ -12,12 +12,77 @@
     --nav-bg: #ffffff;
     --shadow: 0 2px 10px rgba(0,0,0,0.08);
     --shadow-lg: 0 4px 20px rgba(0,0,0,0.12);
+    --surface-2: #f2f2f7;
+    --surface-3: #e5e5ea;
     
     /* iOS safe area support */
     --safe-area-top: env(safe-area-inset-top, 0px);
     --safe-area-bottom: env(safe-area-inset-bottom, 0px);
     --safe-area-left: env(safe-area-inset-left, 0px);
     --safe-area-right: env(safe-area-inset-right, 0px);
+
+    color-scheme: light dark;
+}
+
+/* ── Dark mode: system preference ── */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #000000;
+        --primary: #0a84ff;
+        --primary-hover: #409cff;
+        --secondary: #5e5ce6;
+        --success: #30d158;
+        --danger: #ff453a;
+        --text: #ffffff;
+        --text-secondary: #8e8e93;
+        --border: #38383a;
+        --card-bg: #1c1c1e;
+        --nav-bg: #1c1c1e;
+        --shadow: 0 2px 10px rgba(0,0,0,0.4);
+        --shadow-lg: 0 4px 20px rgba(0,0,0,0.6);
+        --surface-2: #2c2c2e;
+        --surface-3: #3a3a3c;
+    }
+}
+
+/* ── Manual override: force dark ── */
+[data-theme="dark"] {
+    --bg: #000000;
+    --primary: #0a84ff;
+    --primary-hover: #409cff;
+    --secondary: #5e5ce6;
+    --success: #30d158;
+    --danger: #ff453a;
+    --text: #ffffff;
+    --text-secondary: #8e8e93;
+    --border: #38383a;
+    --card-bg: #1c1c1e;
+    --nav-bg: #1c1c1e;
+    --shadow: 0 2px 10px rgba(0,0,0,0.4);
+    --shadow-lg: 0 4px 20px rgba(0,0,0,0.6);
+    --surface-2: #2c2c2e;
+    --surface-3: #3a3a3c;
+    color-scheme: dark;
+}
+
+/* ── Manual override: force light ── */
+[data-theme="light"] {
+    --bg: #f4f7f6;
+    --primary: #007aff;
+    --primary-hover: #0051d5;
+    --secondary: #5856d6;
+    --success: #34c759;
+    --danger: #ff3b30;
+    --text: #1c1c1e;
+    --text-secondary: #8e8e93;
+    --border: #d1d1d6;
+    --card-bg: #ffffff;
+    --nav-bg: #ffffff;
+    --shadow: 0 2px 10px rgba(0,0,0,0.08);
+    --shadow-lg: 0 4px 20px rgba(0,0,0,0.12);
+    --surface-2: #f2f2f7;
+    --surface-3: #e5e5ea;
+    color-scheme: light;
 }
 
 * { 
@@ -182,7 +247,7 @@ body, html {
 .budget-bar-outer {
     width: 100%;
     height: 14px;
-    background: #f2f2f7;
+    background: var(--surface-2);
     border-radius: 8px;
     overflow: hidden;
 }
@@ -326,6 +391,7 @@ input, select {
     -webkit-appearance: none;
     appearance: none;
     background-color: var(--card-bg);
+    color: var(--text);
 }
 
 input:focus, select:focus {
@@ -449,14 +515,14 @@ button[disabled] {
 }
 
 .btn-secondary {
-    background: #f2f2f7;
+    background: var(--surface-2);
     color: var(--text);
     margin-right: 8px;
     margin-bottom: 8px;
 }
 
 .btn-secondary:active {
-    background: #e5e5ea;
+    background: var(--surface-3);
     transform: scale(0.97);
 }
 
@@ -473,7 +539,7 @@ button[disabled] {
 .full-width { grid-column: span 2; }
 
 .icon-btn {
-    background: #f2f2f7;
+    background: var(--surface-2);
     color: var(--text);
     padding: 10px 14px;
     border-radius: 10px;
@@ -489,7 +555,7 @@ button[disabled] {
 }
 
 .icon-btn:active {
-    background: #e5e5ea;
+    background: var(--surface-3);
     transform: scale(0.95);
 }
 
@@ -587,7 +653,8 @@ button[disabled] {
 }
 
 .settings-section code {
-    background: #f2f2f7;
+    background: var(--surface-2);
+    color: var(--text);
     padding: 2px 8px;
     border-radius: 4px;
     font-size: 13px;
@@ -619,7 +686,7 @@ button[disabled] {
 }
 
 .spinner {
-    border: 4px solid #f3f3f3;
+    border: 4px solid var(--surface-2);
     border-top: 4px solid var(--primary);
     border-radius: 50%;
     width: 50px;
@@ -643,7 +710,7 @@ button[disabled] {
     width: 100%;
     max-width: 400px;
     height: 8px;
-    background: #e5e5ea;
+    background: var(--surface-3);
     border-radius: 4px;
     margin: 0 auto;
     overflow: hidden;
@@ -702,7 +769,7 @@ button[disabled] {
     padding: 8px 12px;
     border-radius: 8px;
     border: 1px solid var(--border);
-    background: var(--bg);
+    background: var(--surface-2);
     color: var(--text);
     font-size: 14px;
     cursor: pointer;
@@ -719,7 +786,7 @@ button[disabled] {
     padding: 8px 12px;
     font-size: 18px;
     border-radius: 8px;
-    background: var(--bg);
+    background: var(--surface-2);
     color: var(--text);
     border: 1px solid var(--border);
     cursor: pointer;

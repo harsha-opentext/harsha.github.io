@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000">
+    <meta name="theme-color" id="theme-color-meta" content="#ffffff">
     <title>Calorie Tracker Pro</title>
     <link rel="stylesheet" href="styles.css">
     <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
@@ -237,6 +240,18 @@
     <div id="page-settings" class="page">
         <div class="page-header">
             <h1>Settings</h1>
+        </div>
+
+        <div class="settings-section">
+            <h3>🌙 Appearance</h3>
+            <div class="form-group">
+                <label for="theme-mode">Color Scheme</label>
+                <select id="theme-mode" class="form-input" onchange="setTheme(this.value)">
+                    <option value="auto">Auto (System)</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                </select>
+            </div>
         </div>
 
         <div class="settings-section">
