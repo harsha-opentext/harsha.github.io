@@ -217,6 +217,30 @@ body, html {
     font-size: 28px;
 }
 
+.stat-card-small .stat-unit {
+    color: var(--text-secondary);
+    font-size: 11px;
+    margin-top: 2px;
+}
+
+/* Avg Macros toggle button — full-width, matches secondary button style */
+.macro-toggle-btn {
+    width: 100%;
+    margin-bottom: 8px;
+    min-height: 44px;
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+/* Hides the macro panel; !important beats .history-stats { display: grid } */
+.macro-panel-hidden {
+    display: none !important;
+}
+
 /* Container */
 .container { 
     display: flex;

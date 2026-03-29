@@ -148,8 +148,33 @@
                 <div class="stat-value" id="history-total-calories">0</div>
             </div>
             <div class="stat-card-small">
-                <div class="stat-label">Avg/Day</div>
+                <div class="stat-label">Avg / Day</div>
                 <div class="stat-value" id="history-avg-calories">0</div>
+                <div class="stat-unit">kcal</div>
+            </div>
+        </div>
+
+        <!-- Avg Macros toggle -->
+        <button class="btn-secondary macro-toggle-btn" onclick="toggleMacroPanel()" id="macro-toggle-btn">
+            Avg Macros / Day <span id="macro-toggle-arrow">▾</span>
+        </button>
+
+        <!-- Macro breakdown panel (hidden by default) — reuses existing stat card style -->
+        <div class="history-stats macro-panel-hidden" id="history-macro-panel" style="margin-top:0; margin-bottom:16px;">
+            <div class="stat-card-small">
+                <div class="stat-label" style="color:#007aff;">Protein</div>
+                <div class="stat-value" id="history-avg-protein" style="color:#007aff;">0</div>
+                <div class="stat-unit">g / day</div>
+            </div>
+            <div class="stat-card-small">
+                <div class="stat-label" style="color:#5856d6;">Carbs</div>
+                <div class="stat-value" id="history-avg-carbs" style="color:#5856d6;">0</div>
+                <div class="stat-unit">g / day</div>
+            </div>
+            <div class="stat-card-small">
+                <div class="stat-label" style="color:#34c759;">Fat</div>
+                <div class="stat-value" id="history-avg-fat" style="color:#34c759;">0</div>
+                <div class="stat-unit">g / day</div>
             </div>
         </div>
 

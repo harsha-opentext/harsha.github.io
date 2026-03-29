@@ -2254,14 +2254,158 @@ function ensureHistoryPrefetchIfNeeded() {
     return false;
 }
 function buildHistoryStats(filtered) {
+    console.warn('[buildHistoryStats] called, filtered.length=', filtered && filtered.length, 'first entry keys=', filtered && filtered[0] ? Object.keys(filtered[0]) : 'none');
     try {
         document.getElementById('history-total-entries').innerText = filtered.length;
         const totalCal = filtered.reduce((sum, e) => sum + (parseFloat(e.calories) || 0), 0);
         document.getElementById('history-total-calories').innerText = Math.round(totalCal);
         const uniqueDates = [...new Set(filtered.map(e => getEntryDate(e)).filter(Boolean))];
-        const avgPerDay = uniqueDates.length > 0 ? Math.round(totalCal / uniqueDates.length) : 0;
+        const numDays = uniqueDates.length || 1;
+        const avgPerDay = uniqueDates.length > 0 ? Math.round(totalCal / numDays) : 0;
         document.getElementById('history-avg-calories').innerText = avgPerDay;
-    } catch (e) { dbg(`buildHistoryStats error: ${e && e.message ? e.message : String(e)}`, 'error'); }
+
+        // Support multiple historical key formats for macros (e.g. protein_g, "Protein (g)").
+        const resolveMacroValue = (entry, macroName) => {
+            if (!entry || typeof entry !== 'object') return { value: 0, source: 'invalid-entry' };
+            const aliasMap = {
+                protein: ['protein', 'Protein', 'protein_g', 'protein(g)', 'protein (g)', 'Protein (g)'],
+                carbs: ['carbs', 'Carbs', 'carbohydrates', 'carbohydrate', 'carbs_g', 'carbs(g)', 'carbs (g)', 'Carbs (g)'],
+                fat: ['fat', 'Fat', 'fats', 'fat_g', 'fat(g)', 'fat (g)', 'Fat (g)']
+            };
+
+            const normalizeKey = (k) => String(k || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const parseNumeric = (v) => {
+                if (v === undefined || v === null || v === '') return NaN;
+                if (typeof v === 'number') return v;
+                const m = String(v).match(/-?\d+(?:\.\d+)?/);
+                return m ? parseFloat(m[0]) : NaN;
+            };
+
+            const aliases = aliasMap[macroName] || [macroName];
+            for (const key of aliases) {
+                if (entry[key] !== undefined && entry[key] !== null && entry[key] !== '') {
+                    const v = parseNumeric(entry[key]);
+                    if (!isNaN(v)) return { value: v, source: `direct:${key}` };
+                }
+            }
+
+            // Fuzzy direct-key fallback (handles keys like "protein ", "Protein_g", etc.)
+            const aliasNorm = aliases.map(normalizeKey);
+            for (const [k, raw] of Object.entries(entry)) {
+                const nk = normalizeKey(k);
+                if (aliasNorm.some(a => nk === a || nk.includes(a) || a.includes(nk))) {
+                    const v = parseNumeric(raw);
+                    if (!isNaN(v)) return { value: v, source: `direct-fuzzy:${k}` };
+                }
+            }
+
+            const nestedPools = [entry.macros, entry.macro, entry.nutrients];
+            const poolNames = ['macros', 'macro', 'nutrients'];
+            for (const pool of nestedPools) {
+                if (!pool || typeof pool !== 'object') continue;
+                const poolName = poolNames[nestedPools.indexOf(pool)] || 'nested';
+                for (const key of aliases) {
+                    if (pool[key] !== undefined && pool[key] !== null && pool[key] !== '') {
+                        const v = parseNumeric(pool[key]);
+                        if (!isNaN(v)) return { value: v, source: `nested:${poolName}.${key}` };
+                    }
+                }
+                // Fuzzy nested-key fallback
+                for (const [k, raw] of Object.entries(pool)) {
+                    const nk = normalizeKey(k);
+                    if (aliasNorm.some(a => nk === a || nk.includes(a) || a.includes(nk))) {
+                        const v = parseNumeric(raw);
+                        if (!isNaN(v)) return { value: v, source: `nested-fuzzy:${poolName}.${k}` };
+                    }
+                }
+            }
+
+            return { value: 0, source: 'missing' };
+        };
+
+        // Avg macros per day + debug source tracking
+        let totalProtein = 0;
+        let totalCarbs = 0;
+        let totalFat = 0;
+        const debugStats = {
+            protein: { missing: 0, sources: {} },
+            carbs: { missing: 0, sources: {} },
+            fat: { missing: 0, sources: {} }
+        };
+
+        filtered.forEach((entry) => {
+            const p = resolveMacroValue(entry, 'protein');
+            const c = resolveMacroValue(entry, 'carbs');
+            const f = resolveMacroValue(entry, 'fat');
+
+            totalProtein += p.value;
+            totalCarbs += c.value;
+            totalFat += f.value;
+
+            [
+                ['protein', p],
+                ['carbs', c],
+                ['fat', f]
+            ].forEach(([k, r]) => {
+                if (r.source === 'missing') {
+                    debugStats[k].missing += 1;
+                } else {
+                    debugStats[k].sources[r.source] = (debugStats[k].sources[r.source] || 0) + 1;
+                }
+            });
+        });
+
+        const elP = document.getElementById('history-avg-protein');
+        const elC = document.getElementById('history-avg-carbs');
+        const elF = document.getElementById('history-avg-fat');
+        if (elP) elP.innerText = Math.round(totalProtein / numDays);
+        if (elC) elC.innerText = Math.round(totalCarbs   / numDays);
+        if (elF) elF.innerText = Math.round(totalFat     / numDays);
+
+        dbg(
+            `History macro avg: entries=${filtered.length} days=${numDays} totals(P/C/F)=${Math.round(totalProtein)}/${Math.round(totalCarbs)}/${Math.round(totalFat)} missing(P/C/F)=${debugStats.protein.missing}/${debugStats.carbs.missing}/${debugStats.fat.missing}`,
+            'warn',
+            {
+                proteinSources: debugStats.protein.sources,
+                carbsSources: debugStats.carbs.sources,
+                fatSources: debugStats.fat.sources
+            }
+        );
+
+        if (filtered.length > 0 && totalProtein === 0 && totalCarbs === 0 && totalFat === 0) {
+            if (totalCal > 0) {
+                dbg(
+                    `History macro warning: calories are present (${Math.round(totalCal)}) but macros resolved to zero.`,
+                    'warn'
+                );
+            }
+            const sample = filtered.slice(0, 2).map((e) => ({
+                keys: Object.keys(e || {}),
+                direct: {
+                    protein: e && e.protein,
+                    carbs: e && e.carbs,
+                    fat: e && e.fat,
+                    protein_g: e && e.protein_g,
+                    carbs_g: e && e.carbs_g,
+                    fat_g: e && e.fat_g,
+                    Protein_g: e && e['Protein (g)'],
+                    Carbs_g: e && e['Carbs (g)'],
+                    Fat_g: e && e['Fat (g)']
+                },
+                nestedKeys: {
+                    macros: e && e.macros ? Object.keys(e.macros) : [],
+                    macro: e && e.macro ? Object.keys(e.macro) : [],
+                    nutrients: e && e.nutrients ? Object.keys(e.nutrients) : []
+                }
+            }));
+            dbg('History macro values are all zero; sample entry structure for debugging', 'warn', sample);
+            console.warn('[buildHistoryStats] macro zero — sample:', JSON.stringify(sample, null, 2));
+        }
+        console.warn('[buildHistoryStats] done — P/C/F=', Math.round(totalProtein), '/', Math.round(totalCarbs), '/', Math.round(totalFat));
+    } catch (e) {
+        console.error('[buildHistoryStats] EXCEPTION:', e);
+        dbg(`buildHistoryStats error: ${e && e.message ? e.message : String(e)}`, 'error');
+    }
 }
 
 function buildPageControls(container, sortedDates) {
@@ -2720,6 +2864,14 @@ function clearFilters() {
     state.historyPage = 1;
     try { updateApplyButtonState(); } catch (e) {}
     renderHistory();
+}
+
+function toggleMacroPanel() {
+    const panel = document.getElementById('history-macro-panel');
+    const arrow = document.getElementById('macro-toggle-arrow');
+    if (!panel) return;
+    const isHidden = panel.classList.toggle('macro-panel-hidden');
+    if (arrow) arrow.textContent = isHidden ? '▾' : '▴';
 }
 
 function toggleHistorySelectMode() {
