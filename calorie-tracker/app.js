@@ -3161,6 +3161,8 @@ async function renderAnalytics(date) {
             }
         }
         // Show empty state in charts
+        // Clear any displayed meal total
+        try { const mealTotalEl = document.getElementById('meal-total'); if (mealTotalEl) mealTotalEl.textContent = 'Total: 0 kcal'; } catch (e) {}
         Object.values(charts).forEach(chart => chart.destroy());
         charts = {};
         return;
@@ -3204,6 +3206,12 @@ async function renderAnalytics(date) {
                 }
             }
         });
+        // Compute and display total calories for the meal distribution chart
+        try {
+            const totalCalories = Object.values(mealData).reduce((acc, v) => acc + (parseFloat(v) || 0), 0);
+            const mealTotalEl = document.getElementById('meal-total');
+            if (mealTotalEl) mealTotalEl.textContent = `Total: ${Math.round(totalCalories)} kcal`;
+        } catch (e) { dbg('Could not update meal total display', 'debug'); }
     }
     
     // Macro Distribution Chart (Protein, Carbs, Fat in grams)

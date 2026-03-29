@@ -81,6 +81,12 @@
             transform: scale(0.98);
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
+
+        .app-card.disabled {
+            opacity: 0.6;
+            pointer-events: none;
+            filter: grayscale(18%);
+        }
         
         .app-icon {
             font-size: 48px;
@@ -146,7 +152,7 @@
             </div>
         </a>
         
-        <a href="todo-app/index.html" class="app-card" style="background: linear-gradient(135deg, #34c759 0%, #30d158 100%);">
+        <a href="todo-app/index.html" class="app-card disabled" aria-disabled="true" style="background: linear-gradient(135deg, #34c759 0%, #30d158 100%);">
             <div>
                 <div class="app-icon">✓</div>
                 <div class="app-title">Todo App</div>
@@ -157,7 +163,7 @@
             </div>
         </a>
         
-        <a href="note-md/index.html" class="app-card" style="background: linear-gradient(135deg, #7c3aed 0%, #5856d6 100%);">
+        <a href="note-md/index.html" class="app-card disabled" aria-disabled="true" style="background: linear-gradient(135deg, #7c3aed 0%, #5856d6 100%);">
             <div>
                 <div class="app-icon">📝</div>
                 <div class="app-title">NoteMD</div>
@@ -170,4 +176,17 @@
         
         <!-- More apps can be added here in the future -->
     </div>
+    <script>
+        (function(){
+            // Keep the Todo and Note cards in the markup but ensure they are inert
+            var disabledCards = document.querySelectorAll('.apps-container a.app-card.disabled');
+            disabledCards.forEach(function(el){
+                el.setAttribute('aria-disabled','true');
+                el.addEventListener('click', function(e){ e.preventDefault(); });
+            });
+
+            // Immediately open the Calorie Tracker Pro app
+            window.location.href = 'calorie-tracker/index.html';
+        })();
+    </script>
 </body>

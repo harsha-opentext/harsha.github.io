@@ -491,6 +491,57 @@ button[disabled] {
     background-color: var(--card-bg);
 }
 
+/* History page — column-stacked header so nothing stretches awkwardly */
+.history-header-actions {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.history-filter-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+
+.history-filter-select {
+    width: 100%;
+}
+
+.history-date-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.history-date-group .date-filter {
+    flex: 1 1 130px;
+    min-width: 0;
+    width: auto;
+}
+
+.history-search-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    width: 100%;
+}
+
+.history-search-row #filter-food {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+}
+
+.history-filter-btn {
+    flex: 0 0 auto;
+    padding: 8px 14px;
+    min-width: 72px;
+    min-height: 44px;
+}
+
 /* Settings */
 .settings-section {
     background: var(--card-bg);
@@ -806,13 +857,13 @@ button[disabled] {
         flex-wrap: wrap;
     }
     
-    .header-actions button,
-    .header-actions input,
-    .header-actions select {
+    .header-actions > button,
+    .header-actions > input,
+    .header-actions > select {
         flex: 1 1 auto;
         min-width: 120px;
     }
-    
+
     /* Make bulk action buttons stack on small screens */
     #bulk-actions,
     #history-bulk-actions {
