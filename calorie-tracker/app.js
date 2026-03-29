@@ -705,8 +705,9 @@ async function saveLogs() {
 function showPage(p) {
     document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
-    
-    // Auto-close logs panel when switching pages
+
+    // Persist current page in URL hash so refresh returns to same page
+    history.replaceState(null, '', '#' + p);
     const logPanel = document.getElementById('log-panel');
     if (logPanel && logPanel.getAttribute('aria-hidden') === 'false') {
         logPanel.setAttribute('aria-hidden', 'true');
@@ -1105,6 +1106,15 @@ function clearFormFields() {
             }
         }
     });
+}
+
+function toggleTokenVisibility() {
+    const input = document.getElementById('cfg-token');
+    const icon = document.getElementById('token-eye-icon');
+    if (!input) return;
+    const isHidden = input.type === 'password';
+    input.type = isHidden ? 'text' : 'password';
+    if (icon) icon.textContent = isHidden ? '🙈' : '👁️';
 }
 
 // --- CORE LOGIC ---
@@ -3207,39 +3217,9 @@ let charts = {};
 function updateAnalytics() {
     const dateInput = document.getElementById('analytics-date');
     const selectedDate = dateInput.value || new Date().toISOString().split('T')[0];
-    
-    showLoading(true);
-    
-    setTimeout(() => {
-        renderAnalytics(selectedDate);
-        showLoading(false);
-    }, 500);
+    renderAnalytics(selectedDate);
 }
 
-function showLoading(show) {
-    const loading = document.getElementById('analytics-loading');
-    const content = document.getElementById('analytics-content');
-    if (show) {
-        loading.style.display = 'block';
-        content.style.display = 'none';
-        animateProgress();
-    } else {
-        loading.style.display = 'none';
-        content.style.display = 'block';
-    }
-}
-
-function animateProgress() {
-    const progress = document.getElementById('analytics-progress');
-    let width = 0;
-    const interval = setInterval(() => {
-        width += 10;
-        progress.style.width = width + '%';
-        if (width >= 100) {
-            clearInterval(interval);
-        }
-    }, 50);
-}
 
 async function renderAnalytics(date) {
     const dateStr = date || (new Date().toISOString().split('T')[0]);
@@ -3346,10 +3326,33 @@ async function renderAnalytics(date) {
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: true,
+                maintainAspectRatio: false,
+                aspectRatio: 2,
+                layout: { padding: { right: 16 } },
                 plugins: {
                     legend: {
-                        position: 'bottom'
+                        position: 'right',
+                        labels: {
+                            color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e',
+                            boxWidth: 14,
+                            padding: 16,
+                            font: { size: 13 },
+                            generateLabels: function(chart) {
+                                const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e';
+                                const data = (chart.data.datasets && chart.data.datasets[0] && chart.data.datasets[0].data) || [];
+                                const labels = chart.data.labels || [];
+                                return labels.map((lab, i) => ({
+                                    text: lab,
+                                    fillStyle: (chart.data.datasets[0].backgroundColor || [])[i] || '#000',
+                                    strokeStyle: 'transparent',
+                                    lineWidth: 0,
+                                    fontColor: textColor,
+                                    color: textColor,
+                                    hidden: false,
+                                    index: i
+                                }));
+                            }
+                        }
                     },
                     tooltip: {
                         callbacks: {
@@ -3394,13 +3397,20 @@ async function renderAnalytics(date) {
                 },
                 options: {
                     responsive: true,
-                    maintainAspectRatio: true,
+                    maintainAspectRatio: false,
+                    aspectRatio: 2,
+                    layout: { padding: { right: 16 } },
                     plugins: {
                         legend: {
                             position: 'right',
                             labels: {
+                                color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e',
+                                boxWidth: 14,
+                                padding: 16,
+                                font: { size: 13 },
                                 // Generate labels that include grams and percentage
                                 generateLabels: function(chart) {
+                                    const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e';
                                     const data = (chart.data.datasets && chart.data.datasets[0] && chart.data.datasets[0].data) || [];
                                     const labels = chart.data.labels || [];
                                     const total = data.reduce((s, v) => s + (parseFloat(v) || 0), 0) || 1;
@@ -3410,6 +3420,10 @@ async function renderAnalytics(date) {
                                         return {
                                             text: `${lab}: ${Math.round(value)}g (${pct}%)`,
                                             fillStyle: (chart.data.datasets[0].backgroundColor || [])[i] || '#000',
+                                            strokeStyle: 'transparent',
+                                            lineWidth: 0,
+                                            fontColor: textColor,
+                                            color: textColor,
                                             hidden: false,
                                             index: i
                                         };
@@ -3547,12 +3561,15 @@ async function renderAnalytics(date) {
                         maintainAspectRatio: true,
                         parsing: false,
                         scales: {
-                            x: { type: 'linear', min: 1, max: 10, ticks: { stepSize: 1 }, title: { display: true, text: 'Health Score (1-10)' } },
-                            y: { beginAtZero: true, title: { display: true, text: mode === 'per100kcal' ? 'Amount per 100 kcal' : 'Average Amount (g)' } }
+                            x: { type: 'linear', min: 1, max: 10, ticks: { stepSize: 1, color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e' }, title: { display: true, text: 'Health Score (1-10)', color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#8e8e93' }, grid: { color: 'rgba(128,128,128,0.15)' } },
+                            y: { beginAtZero: true, ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e' }, title: { display: true, text: mode === 'per100kcal' ? 'Amount per 100 kcal' : 'Average Amount (g)', color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#8e8e93' }, grid: { color: 'rgba(128,128,128,0.15)' } }
                         },
-                        plugins: {
-                            legend: { position: 'bottom' },
-                            tooltip: {
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e' }
+                        },
+                        tooltip: {
                                 callbacks: {
                                     label: function(ctx) {
                                         if (!ctx.parsed) return '';
@@ -3760,6 +3777,13 @@ window.onload = async () => {
     const endInit = document.getElementById('filter-date-end');
     if (endInit) endInit.setAttribute('placeholder', 'End');
     try { updateApplyButtonState(); } catch (e) {}
+
+    // Restore last active page from URL hash (survives browser refresh)
+    const validPages = ['tracker', 'history', 'analytics', 'settings', 'logs'];
+    const hashPage = window.location.hash.replace('#', '');
+    if (validPages.includes(hashPage)) {
+        showPage(hashPage);
+    }
 
     // Ensure date button and tracker render initialize even if no fetch occurs
     try {

@@ -29,10 +29,6 @@
     <nav class="main-nav">
         <div class="nav-brand">📊 Tracker Pro</div>
         <div class="nav-links">
-            <a href="../index.html" class="nav-btn" style="text-decoration: none;">
-                <span class="icon">←</span>
-                <span class="label">Apps</span>
-            </a>
             <button id="tab-tracker" class="nav-btn active" onclick="showPage('tracker')">
                 <span class="icon">➕</span>
                 <span class="label">Add Entry</span>
@@ -193,24 +189,17 @@
             </div>
         </div>
 
-        <div id="analytics-loading" class="loading-container" style="display: none;">
-            <div class="spinner"></div>
-            <div class="loading-text">Loading data...</div>
-            <div class="progress-bar">
-                <div class="progress-fill" id="analytics-progress"></div>
-            </div>
-        </div>
 
         <div id="analytics-content">
             <div class="chart-container">
                 <h3>Calorie Distribution by Meal</h3>
                 <p id="meal-total" style="font-size:15px; font-weight:600; color:var(--primary); margin-bottom:8px;"></p>
-                <canvas id="chart-meal-distribution"></canvas>
+                <div class="chart-doughnut-wrap"><canvas id="chart-meal-distribution"></canvas></div>
             </div>
             
             <div class="chart-container">
                 <h3>Macro Distribution</h3>
-                <canvas id="chart-macro-distribution"></canvas>
+                <div class="chart-doughnut-wrap"><canvas id="chart-macro-distribution"></canvas></div>
             </div>
 
             <div class="chart-container">
@@ -258,7 +247,12 @@
             <h3>🔐 GitHub Configuration</h3>
             <div class="form-group">
                 <label>Personal Access Token</label>
-                <input type="password" id="cfg-token" placeholder="ghp_..." class="form-input">
+                <div class="input-reveal-wrap">
+                    <input type="password" id="cfg-token" placeholder="ghp_..." class="form-input">
+                    <button type="button" class="input-reveal-btn" onclick="toggleTokenVisibility()" aria-label="Toggle token visibility" title="Show / hide token">
+                        <span id="token-eye-icon">👁️</span>
+                    </button>
+                </div>
             </div>
             <div class="form-group">
                 <label>Repository Path</label>
