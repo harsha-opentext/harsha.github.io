@@ -57,7 +57,6 @@
     <div id="page-tracker" class="page active">
         <div class="page-header">
             <div class="header-actions">
-                <button class="icon-btn" onclick="reloadApp()" title="Refresh Data">🔄</button>
                 <div style="display: flex; gap: 8px; padding-left: 8px; border-left: 1px solid var(--border);">
                     <button class="btn-secondary" onclick="fetchFromGit(true)" style="padding: 10px 16px; font-size: 14px;">⬇️ Fetch Today</button>
                     <!-- Publish button removed: per-day auto-sync in use -->
@@ -108,26 +107,28 @@
     <div id="page-history" class="page">
         <div class="page-header">
             <h1>Entry History</h1>
-            <div class="header-actions">
-                <div style="display: flex; flex-direction: column; gap: 4px;">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <select id="range-select" class="date-filter" onchange="handleRangeSelect()" style="padding: 8px;">
-                            <option value="">Select range</option>
-                            <option value="today">Today</option>
-                            <option value="yesterday">Yesterday</option>
-                            <option value="7">Last 7 days</option>
-                            <option value="30">Last 30 days</option>
-                            <option value="90">Last 90 days</option>
-                            <option value="all">All time</option>
-                        </select>
-                        <input type="date" id="filter-date-start" class="date-filter" onchange="handleStartDateChange()" placeholder="Start" style="padding:8px; margin-left:8px;">
-                        <input type="date" id="filter-date-end" class="date-filter" onchange="handleEndDateChange()" placeholder="End" style="padding:8px; margin-left:4px;">
-                        <button type="button" id="apply-date-range-btn" class="btn-primary" onclick="applyDateRange()" style="padding:8px; margin-left:6px; min-width:84px;">Apply</button>
-                        <button type="button" class="btn-secondary" onclick="clearFilters()" style="padding:8px; margin-left:6px; min-width:84px;">Clear</button>
+            <div class="header-actions history-header-actions">
+                <div class="history-filter-row">
+                    <select id="range-select" class="date-filter history-filter-select" onchange="handleRangeSelect()">
+                        <option value="">Select range</option>
+                        <option value="today">Today</option>
+                        <option value="yesterday">Yesterday</option>
+                        <option value="7">Last 7 days</option>
+                        <option value="30">Last 30 days</option>
+                        <option value="90">Last 90 days</option>
+                        <option value="all">All time</option>
+                    </select>
+                    <div class="history-date-group">
+                        <input type="date" id="filter-date-start" class="date-filter" onchange="handleStartDateChange()" placeholder="Start">
+                        <input type="date" id="filter-date-end" class="date-filter" onchange="handleEndDateChange()" placeholder="End">
+                        <button type="button" id="apply-date-range-btn" class="btn-primary history-filter-btn" onclick="applyDateRange()">Apply</button>
+                        <button type="button" class="btn-secondary history-filter-btn" onclick="clearFilters()">Clear</button>
                     </div>
                 </div>
-                <input type="text" id="filter-food" class="date-filter" placeholder="Search food..." oninput="filterHistory()" style="width: 150px;">
-                <button id="history-select-mode-btn" class="btn-secondary" onclick="toggleHistorySelectMode()" style="padding: 10px 16px; font-size: 14px;">☑️ Select</button>
+                <div class="history-search-row">
+                    <input type="text" id="filter-food" class="date-filter" placeholder="Search food..." oninput="filterHistory()">
+                    <button id="history-select-mode-btn" class="btn-secondary history-filter-btn" onclick="toggleHistorySelectMode()">☑️ Select</button>
+                </div>
             </div>
         </div>
         
@@ -175,6 +176,7 @@
         <div id="analytics-content">
             <div class="chart-container">
                 <h3>Calorie Distribution by Meal</h3>
+                <p id="meal-total" style="font-size:15px; font-weight:600; color:var(--primary); margin-bottom:8px;"></p>
                 <canvas id="chart-meal-distribution"></canvas>
             </div>
             
