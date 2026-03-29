@@ -721,16 +721,20 @@ function showPage(p) {
     
     // Load page-specific content
     if (p === 'history') {
-        // Default history view: show only today's entries to avoid an expensive
-        // full-folder fetch on every navigation. If the user requests a range
-        // or older data, a fetch will be triggered from the range handler.
-        // Reset the prefetch attempts so returning to History can re-request
-        // missing date files if the local `state.entries` has changed while
-        // on other pages (e.g. tracker-only loads).
         state.historyPrefetchAttempts.clear();
 
-        state.dateRangeStart = getTodayString();
-        state.dateRangeEnd = getTodayString();
+        const today = getTodayString();
+        state.dateRangeStart = today;
+        state.dateRangeEnd = today;
+
+        // Initialise / reset filter controls to "Today"
+        try {
+            const rs = document.getElementById('range-select'); if (rs) rs.value = 'today';
+            const s = document.getElementById('filter-date-start'); if (s) s.value = today;
+            const e = document.getElementById('filter-date-end'); if (e) e.value = today;
+            updateApplyButtonState();
+        } catch (e) {}
+
         try {
             fetchFromGit(true).then(() => {
                 renderHistory();
@@ -2720,70 +2724,87 @@ function addDaysToDateString(dateStr, days) {
     return formatDateLocal(d);
 }
 
+// Returns the dropdown value that matches a start+end pair, or '' if none.
+function matchPreset(start, end) {
+    const today = getTodayString();
+    if (start === today && end === today) return 'today';
+    if (start === addDaysToDateString(today, -1) && end === addDaysToDateString(today, -1)) return 'yesterday';
+    if (start === addDaysToDateString(today, -6) && end === today) return '7';
+    if (start === addDaysToDateString(today, -29) && end === today) return '30';
+    return '';
+}
+
 function handleRangeSelect() {
     const sel = document.getElementById('range-select');
     if (!sel) return;
-    // When the user picks a quick range, prefer that over any active calendar selection
     state.historyUsingCalendar = false;
     const v = sel.value;
     const today = getTodayString();
 
-    if (!v || v === 'all') {
-        state.dateRangeStart = null;
-        state.dateRangeEnd = null;
-    } else if (v === 'today') {
+    if (v === 'today') {
         state.dateRangeStart = today;
         state.dateRangeEnd = today;
     } else if (v === 'yesterday') {
         state.dateRangeStart = addDaysToDateString(today, -1);
         state.dateRangeEnd = state.dateRangeStart;
     } else {
-        // numeric days (last N days)
         const days = parseInt(v, 10);
-        const start = addDaysToDateString(today, -(days - 1));
-        state.dateRangeStart = start;
+        state.dateRangeStart = addDaysToDateString(today, -(days - 1));
         state.dateRangeEnd = today;
     }
 
+    // Sync date inputs to match the chosen preset
+    const startEl = document.getElementById('filter-date-start');
+    const endEl = document.getElementById('filter-date-end');
+    if (startEl) startEl.value = state.dateRangeStart;
+    if (endEl) endEl.value = state.dateRangeEnd;
+
     state.historyPage = 1;
-    // Indicate loading while history range is being refreshed
-    try { document.body.__historyLoadingFlag = true; } catch (e) { /* ignore */ }
-    // Clear any start/end inputs to reflect dropdown selection
-    try { const s = document.getElementById('filter-date-start'); if (s) s.value = ''; const e = document.getElementById('filter-date-end'); if (e) e.value = ''; } catch (e) {}
+    try { document.body.__historyLoadingFlag = true; } catch (e) {}
     try { updateApplyButtonState(); } catch (e) {}
     renderHistory();
 }
 
 function handleStartDateChange() {
-    const startInput = document.getElementById('filter-date-start');
-    if (!startInput) return;
-    const selected = startInput.value;
-    if (!selected) {
-        state.dateRangeStart = null;
-        if (!(document.getElementById('filter-date-end')?.value)) state.historyUsingCalendar = false;
-        startInput.setAttribute('placeholder', 'Start');
-        return;
-    }
-    state.dateRangeStart = selected;
+    const startEl = document.getElementById('filter-date-start');
+    const endEl = document.getElementById('filter-date-end');
+    if (!startEl) return;
+    const start = startEl.value;
+    const end = endEl?.value || start; // if no end, treat end = start
+    if (!end && endEl) endEl.value = start; // mirror to end if blank
+    state.dateRangeStart = start || null;
+    state.dateRangeEnd = endEl?.value || null;
     state.historyUsingCalendar = true;
-    // Do not auto-apply; wait for user to click Apply to trigger filtering.
+    // Sync dropdown
+    const sel = document.getElementById('range-select');
+    if (sel) sel.value = matchPreset(state.dateRangeStart, state.dateRangeEnd);
     try { updateApplyButtonState(); } catch (e) {}
+    if (state.dateRangeStart && state.dateRangeEnd) {
+        state.historyPage = 1;
+        try { document.body.__historyLoadingFlag = true; } catch (e) {}
+        renderHistory();
+    }
 }
 
 function handleEndDateChange() {
-    const endInput = document.getElementById('filter-date-end');
-    if (!endInput) return;
-    const selected = endInput.value;
-    if (!selected) {
-        state.dateRangeEnd = null;
-        if (!(document.getElementById('filter-date-start')?.value)) state.historyUsingCalendar = false;
-        endInput.setAttribute('placeholder', 'End');
-        return;
-    }
-    state.dateRangeEnd = selected;
+    const startEl = document.getElementById('filter-date-start');
+    const endEl = document.getElementById('filter-date-end');
+    if (!endEl) return;
+    const end = endEl.value;
+    const start = startEl?.value || end; // if no start, treat start = end
+    if (!startEl?.value && startEl) startEl.value = end; // mirror to start if blank
+    state.dateRangeStart = startEl?.value || null;
+    state.dateRangeEnd = end || null;
     state.historyUsingCalendar = true;
-    // Do not auto-apply; wait for user to click Apply to trigger filtering.
+    // Sync dropdown
+    const sel = document.getElementById('range-select');
+    if (sel) sel.value = matchPreset(state.dateRangeStart, state.dateRangeEnd);
     try { updateApplyButtonState(); } catch (e) {}
+    if (state.dateRangeStart && state.dateRangeEnd) {
+        state.historyPage = 1;
+        try { document.body.__historyLoadingFlag = true; } catch (e) {}
+        renderHistory();
+    }
 }
 
 function applyDateRange() {
@@ -2864,16 +2885,17 @@ function filterHistory() {
 }
 
 function clearFilters() {
+    const today = getTodayString();
     const start = document.getElementById('filter-date-start');
     const end = document.getElementById('filter-date-end');
-    if (start) { start.value = ''; start.setAttribute('placeholder', 'Start'); }
-    if (end) { end.value = ''; end.setAttribute('placeholder', 'End'); }
+    if (start) start.value = today;
+    if (end) end.value = today;
     const food = document.getElementById('filter-food');
     if (food) food.value = '';
-    state.dateRangeStart = null;
-    state.dateRangeEnd = null;
+    state.dateRangeStart = today;
+    state.dateRangeEnd = today;
     state.historyUsingCalendar = false;
-    try { const rs = document.getElementById('range-select'); if (rs) rs.value = ''; } catch (e) {}
+    try { const rs = document.getElementById('range-select'); if (rs) rs.value = 'today'; } catch (e) {}
     state.historyPage = 1;
     try { updateApplyButtonState(); } catch (e) {}
     renderHistory();
