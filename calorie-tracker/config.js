@@ -16,6 +16,10 @@ const DEFAULT_CONFIG = {
     // UI settings
     theme: 'dark',
     showLogs: false,
+    // Show full toasts (if false, show compact colored dot)
+    showToasts: true,
+    // Allow editing recorded weights for dates other than today
+    allowEditOlderWeights: false,
     logRetentionMinutes: 5
 };
 
