@@ -95,10 +95,26 @@
         <div class="container" id="list-container"></div>
         
         <div class="form-panel">
-            <h3>Add New Entry</h3>
+            <h3 id="form-panel-title">Add New Entry</h3>
             <div class="controls" id="form-container">
                 <!-- Form fields and button will be dynamically generated here -->
             </div>
+        </div>
+
+        <!-- Compact weight panel (one-entry box) placed below Add New Entry -->
+        <div class="form-panel weight-panel" style="padding:12px; margin-top:12px; max-width:480px;">
+            <div style="display:flex; align-items:center; gap:12px; width:100%; min-width:0;">
+                <div style="display:flex; align-items:center; gap:12px; min-width:0;">
+                    <label style="font-weight:600; margin:0; white-space:nowrap;">Record weight (kg)</label>
+                    <input type="number" id="weight-input" step="0.1" inputmode="decimal" placeholder="77.2" style="padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:16px; width:64px; flex:0 0 auto;">
+                </div>
+                <div class="weight-actions" style="display:flex; align-items:center; gap:8px; margin-left:auto; white-space:nowrap;">
+                    <button id="save-weight-btn" class="btn-primary" onclick="handleSaveWeight()" style="flex:0 0 auto;">Save</button>
+                    <button id="edit-weight-btn" class="btn-secondary" onclick="enableWeightEdit()" style="display:none; flex:0 0 auto;">Edit</button>
+                    <div id="weight-saved-display" style="color:var(--text-secondary); font-weight:600; margin-left:6px; white-space:nowrap; max-width:84px; overflow:hidden; text-overflow:ellipsis;"> </div>
+                </div>
+            </div>
+            <div style="font-size:12px; color:var(--text-secondary); margin-top:8px;">Record weight once per day. If already recorded the control will be disabled.</div>
         </div>
     </div>
 
@@ -148,6 +164,10 @@
                 <div class="stat-value" id="history-avg-calories">0</div>
                 <div class="stat-unit">kcal</div>
             </div>
+        </div>
+
+        <div style="margin: 12px 0;">
+            <button id="view-weight-graph-btn" class="btn-primary" style="display:none;" onclick="openWeightModalForRange()">View weight graph</button>
         </div>
 
         <!-- Avg Macros toggle -->
@@ -263,8 +283,23 @@
         </div>
 
         <div class="settings-section">
+            <h3>🔧 Toggles</h3>
+            <div class="form-group">
+                <button class="btn-primary" id="open-toggles-btn" onclick="openTogglesPopup()">Show Toggles</button>
+                <div style="font-size:13px; color:var(--text-secondary); margin-top:8px;">Open the toggles panel to access notification and weight edit options.</div>
+            </div>
+        </div>
+
+        <div class="settings-section">
             <h3>🔄 Data Management</h3>
             <button class="btn-danger" onclick="clearAllData()">🗑️ Clear Local Data</button>
+        </div>
+
+        <div class="settings-section">
+            <h3>⚖️ Weight</h3>
+            <div class="form-group">
+                <div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">Toggle weight-related settings from the Toggles panel.</div>
+            </div>
         </div>
 
         <div class="settings-section">
@@ -334,11 +369,8 @@
                     <button class="btn-primary" onclick="parseCsv()" style="width: 100%;">🔍 Parse & Preview</button>
                 </div>
                 
-                <div id="csv-preview-section" style="display: none;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 16px; background: var(--bg); border-radius: 12px;">
-                        <div>
-                            <h3 style="margin: 0 0 4px 0; font-size: 18px;">Preview</h3>
-                            <p style="margin: 0; color: var(--text-secondary); font-size: 14px;"><span id="csv-count">0</span> entries ready to import</p>
+                    <div id="csv-preview-section" style="display: none;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 16px; background: var(--bg); border-radius: 12px;">
                         </div>
                         <div style="display: flex; gap: 8px;">
                             <button class="btn-secondary" onclick="backToCsvInput()" style="padding: 10px 20px;">← Back</button>
@@ -400,6 +432,81 @@
 
             
     </div>
+    <!-- Weight Edit Modal -->
+    <div id="weight-edit-modal" class="modal" style="display:none;">
+        <div class="modal-content" style="max-width:420px;">
+            <div class="modal-header">
+                <h2>✏️ Edit weight</h2>
+                <button onclick="closeWeightEditModal()" class="modal-close">✕</button>
+            </div>
+            <div class="modal-body">
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    <label style="font-weight:600; margin-bottom:6px;">Weight (kg)</label>
+                    <input type="number" id="weight-edit-input" step="0.1" inputmode="decimal" placeholder="77.2" style="padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:16px; width:72px;" onkeydown="if(event.key==='Enter'){ saveWeightFromModal(); }">
+                    <div style="font-size:13px; color:var(--text-secondary);">Values are rounded to one decimal place.</div>
+                </div>
+            </div>
+            <div style="padding: 12px; display:flex; justify-content:flex-end; gap:8px;">
+                <button id="weight-edit-cancel" class="btn-secondary" onclick="closeWeightEditModal()">Cancel</button>
+                <button id="weight-edit-save" class="btn-primary" onclick="saveWeightFromModal()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Weight Graph Modal -->
+    <div id="weight-modal" class="modal" style="display:none;">
+        <div class="modal-content" style="max-width:760px; width:90%;">
+            <div class="modal-header">
+                <h2>📈 Weight Trend</h2>
+                <button onclick="closeWeightModal()" class="modal-close">✕</button>
+            </div>
+            <div class="modal-body" style="padding: 12px 20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px;">
+                    <div>Start: <span id="weight-modal-start">—</span></div>
+                    <div>End: <span id="weight-modal-end">—</span></div>
+                </div>
+                <div style="height:320px;">
+                    <canvas id="chart-weight-trend" style="width:100%; height:100%;"></canvas>
+                </div>
+            </div>
+
+                <!-- Toggles Popup Modal (Notifications + Weight) -->
+                <div id="toggles-modal" class="modal" style="display:none;">
+                    <div class="modal-content" style="max-width:420px;">
+                        <div class="modal-header">
+                            <h2>⚙️ Toggles</h2>
+                            <button onclick="closeTogglesPopup()" class="modal-close">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <div style="display:flex; flex-direction:column; gap:12px;">
+                                <label style="display:flex; align-items:center; justify-content:space-between;">
+                                    <span>Show full toasts</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="cfg-show-toasts" onchange="toggleShowToasts(this.checked)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+
+                                <label style="display:flex; align-items:center; justify-content:space-between;">
+                                    <span>Allow editing past recorded weights</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="cfg-allow-edit-weights" onchange="toggleAllowEditWeights(this.checked)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
+                            </div>
+                        </div>
+                        <div style="padding: 12px; display:flex; justify-content:flex-end; gap:8px;">
+                            <button class="btn-secondary" onclick="closeTogglesPopup()">Close</button>
+                        </div>
+                    </div>
+                </div>
+            <div style="padding: 12px; display:flex; justify-content:flex-end; gap:8px;">
+                <button class="btn-secondary" onclick="closeWeightModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- App-level Confirm Modal -->
     <div id="app-confirm-modal" class="modal" style="display: none;">
         <div class="modal-content" style="max-width:420px;">

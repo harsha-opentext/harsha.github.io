@@ -19,6 +19,48 @@ let state = {
     
 };
 
+// Early listener: ensure clicks on the Toggles button are detected even if later initialization fails
+try {
+    console.log('[app.js] instrumentation loaded');
+    document.addEventListener('click', function (ev) {
+        try {
+            if (!ev || !ev.target) return;
+            const btn = ev.target.closest ? ev.target.closest('#open-toggles-btn') : null;
+            if (btn) {
+                try {
+                    console.log('[debug] open-toggles-btn clicked (early listener)', ev.target && ev.target.tagName, ev.target && ev.target.id);
+                    if (typeof openTogglesPopup === 'function') { openTogglesPopup(); return; }
+                    if (typeof window.openTogglesPopup === 'function') { window.openTogglesPopup(); return; }
+                    console.log('[debug] openTogglesPopup not defined at click time');
+                } catch (err) {
+                    console.error('[debug] openTogglesPopup call error', err);
+                }
+            }
+        } catch (e) { console.error('[debug] early listener error', e); }
+    }, true);
+
+    // Fallback: attempt to attach a direct handler to the button until it exists
+    const attachInterval = setInterval(() => {
+        try {
+            const directBtn = document.getElementById('open-toggles-btn');
+            if (directBtn && !directBtn.__toggles_bound) {
+                console.log('[debug] Attaching direct click handler to #open-toggles-btn');
+                directBtn.addEventListener('click', (e) => {
+                    console.log('[debug] direct handler: #open-toggles-btn clicked', e.target && e.target.tagName, e.target && e.target.id);
+                    try { if (typeof openTogglesPopup === 'function') openTogglesPopup(); else if (typeof window.openTogglesPopup === 'function') window.openTogglesPopup(); else console.log('[debug] openTogglesPopup missing at direct handler'); } catch (err) { console.error('[debug] direct handler error', err); }
+                });
+                directBtn.__toggles_bound = true;
+                clearInterval(attachInterval);
+            }
+        } catch (e) { /* ignore */ }
+    }, 200);
+} catch (e) { console.error('[debug] instrumentation setup failed', e); }
+
+// allow toggling weight edit mode for the compact panel
+state.weightEditMode = false;
+// Track which date is being edited in the weight-edit modal (null when closed)
+state.weightEditTargetDate = null;
+
 // Track which history date-sets we've attempted to prefetch to avoid fetch loops
 state.historyPrefetchAttempts = new Set();
 // Track which history date-sets we've already notified as served from local cache
@@ -57,8 +99,8 @@ function dbg(msg, type = 'info', raw = null) {
     } catch (e) { /* ignore */ }
 }
 
-// Lightweight toast notification (non-blocking)
-function showNotification(message, type = 'info') {
+// Full toast notification (non-blocking) — preserves original behavior
+function showFullNotification(message, type = 'info') {
     try {
         const n = document.createElement('div');
         n.className = 'gt-notification';
@@ -81,6 +123,40 @@ function showNotification(message, type = 'info') {
         const existing = Array.from(document.querySelectorAll('.gt-notification'));
         existing.forEach((el, idx) => { el.style.top = `${16 + idx * 56}px`; });
         setTimeout(() => { n.style.opacity = '0'; setTimeout(() => n.remove(), 300); }, 2500);
+    } catch (e) { /* ignore */ }
+}
+
+// Lightweight notification wrapper: show full toast when enabled, otherwise show compact dot.
+// `forceFull` allows callers to force a full toast regardless of user setting.
+function showNotification(message, type = 'info', forceFull = false) {
+    try {
+        const alwaysFull = (type === 'error'); // errors always shown full
+        const enabled = !!getConfig('showToasts');
+        if (enabled || forceFull || alwaysFull) {
+            try { showFullNotification(message, type); } catch (e) { /* ignore */ }
+            return;
+        }
+
+        // Show compact colored dot instead of full toast
+        const dot = document.createElement('div');
+        dot.className = 'gt-notification-dot';
+        dot.setAttribute('title', message || '');
+        dot.setAttribute('aria-label', message || '');
+
+        // Determine color based on type using CSS variables
+        const style = getComputedStyle(document.documentElement);
+        let bg = style.getPropertyValue('--primary').trim() || '#007aff';
+        if (type === 'error' || type === 'delete') bg = style.getPropertyValue('--danger').trim() || '#ff3b30';
+        else if (type === 'write' || type === 'success') bg = style.getPropertyValue('--success').trim() || '#34c759';
+        else if (type === 'read') bg = style.getPropertyValue('--primary').trim() || '#007aff';
+
+        dot.style.background = bg;
+
+        // Stack multiple dots slightly to avoid full overlap
+        const existingDots = Array.from(document.querySelectorAll('.gt-notification-dot'));
+        existingDots.forEach((el, idx) => { el.style.top = `${16 + idx * 20}px`; });
+        document.body.appendChild(dot);
+        setTimeout(() => { dot.style.opacity = '0'; setTimeout(() => dot.remove(), 300); }, 2200);
     } catch (e) { /* ignore */ }
 }
 
@@ -208,6 +284,7 @@ function render() {
             ? state.entries.reduce((s, e) => (getEntryDate(e) === today ? s + (parseFloat(e.calories) || 0) : s), 0)
             : 0;
         if (typeof updateBudgetUI === 'function') updateBudgetUI(todayTotal);
+        if (typeof updateWeightTabUI === 'function') updateWeightTabUI(today);
 
         const activePage = document.querySelector('.page.active');
 
@@ -226,7 +303,8 @@ function render() {
                     const todayIdx = [];
                     state.entries.forEach((e, i) => {
                         const d = getEntryDate(e);
-                        if (d === today) todayIdx.push({ entry: e, idx: i });
+                        // Exclude internal meta entries (dailyWeight) from the visible tracker list
+                        if (d === today && !(e && e._meta === 'dailyWeight')) todayIdx.push({ entry: e, idx: i });
                     });
 
                     if (todayIdx.length === 0) {
@@ -323,6 +401,181 @@ async function saveBudgetToRepo() {
     } catch (err) {
         dbg('Save budget error: ' + err.message, 'error');
         alert('Error saving budget to repo. Check logs.');
+    }
+}
+
+// Save current app configuration (from getAllConfig) to the repository as settings.json
+async function saveSettingsToRepo() {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) {
+        dbg('Cannot save settings: missing GitHub credentials', 'warn');
+        return false;
+    }
+
+    const filePath = 'settings.json';
+    const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+
+    // Build settings object from current config (do not include tokens)
+    let configObj = {};
+    try {
+        if (typeof getAllConfig === 'function') {
+            configObj = getAllConfig();
+        } else {
+            // Fallback: persist only known key
+            configObj = { allowEditOlderWeights: getConfig('allowEditOlderWeights') };
+        }
+    } catch (e) {
+        configObj = { allowEditOlderWeights: getConfig('allowEditOlderWeights') };
+    }
+
+    try {
+        // Try to fetch existing file to include SHA
+        let fileSha = null;
+        try {
+            const getRes = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+            if (getRes.ok) {
+                const j = await getRes.json();
+                fileSha = j.sha;
+            }
+        } catch (e) { /* ignore */ }
+
+        const body = {
+            message: `Update settings: ${new Date().toISOString()}`,
+            content: btoa(unescape(encodeURIComponent(JSON.stringify(configObj, null, 2))))
+        };
+        if (fileSha) body.sha = fileSha;
+
+        // Attempt initial PUT
+        let putRes = await fetch(url, { method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (putRes.ok) {
+            try { showNotification('Settings saved to repo', 'write'); } catch (e) {}
+            dbg('Settings saved to GitHub', 'info');
+            return true;
+        }
+
+        // Handle conflict (409) by re-fetching latest SHA and retrying once
+        if (putRes.status === 409) {
+            dbg('saveSettingsToRepo: conflict (409) — refreshing remote SHA and retrying', 'warn');
+            try {
+                const refreshRes = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+                if (refreshRes.ok) {
+                    const refreshed = await refreshRes.json();
+                    if (refreshed && refreshed.sha) {
+                        body.sha = refreshed.sha;
+                        dbg('saveSettingsToRepo: retrying PUT with refreshed sha=' + body.sha, 'debug');
+                        putRes = await fetch(url, { method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                        if (putRes.ok) {
+                            try { showNotification('Settings saved to repo', 'write'); } catch (e) {}
+                            dbg('Settings saved to GitHub (after retry)', 'info');
+                            return true;
+                        }
+                    }
+                } else {
+                    dbg('saveSettingsToRepo: failed to refresh settings.json after 409', 'error');
+                }
+            } catch (e) {
+                dbg('saveSettingsToRepo retry error: ' + (e && e.message), 'error', e);
+            }
+        }
+
+        // If we reach here, attempt to read error body for clearer message
+        let errBody = null;
+        try { errBody = await putRes.json(); } catch (e) { errBody = null; }
+        const errMsg = (errBody && (errBody.message || JSON.stringify(errBody))) || putRes.statusText || `HTTP ${putRes.status}`;
+        dbg('Failed to save settings: ' + errMsg, 'error', errBody);
+        try { showNotification(`Failed to save settings to repo: ${errMsg}`, 'error', true); } catch (e) {}
+        return false;
+    } catch (err) {
+        dbg('saveSettingsToRepo error: ' + err.message, 'error');
+        try { showNotification('Error saving settings to repo', 'error'); } catch (e) {}
+        return false;
+    }
+}
+
+// Settings save queue to avoid concurrent PUTs causing SHA conflicts
+let __settingsSaveQueue = [];
+let __settingsSaveInProgress = false;
+let __settingsSaveDebounceTimer = null;
+const __SETTINGS_SAVE_DEBOUNCE_MS = 250;
+
+function enqueueSettingsSave() {
+    return new Promise((resolve, reject) => {
+        __settingsSaveQueue.push({ resolve, reject });
+        if (__settingsSaveDebounceTimer) clearTimeout(__settingsSaveDebounceTimer);
+        __settingsSaveDebounceTimer = setTimeout(() => {
+            __processSettingsSaveQueue();
+        }, __SETTINGS_SAVE_DEBOUNCE_MS);
+    });
+}
+
+async function __processSettingsSaveQueue() {
+    if (__settingsSaveInProgress) return;
+    if (__settingsSaveDebounceTimer) { clearTimeout(__settingsSaveDebounceTimer); __settingsSaveDebounceTimer = null; }
+    if (__settingsSaveQueue.length === 0) return;
+    __settingsSaveInProgress = true;
+    try {
+        // Perform a single save for all queued requests (coalesced)
+        const ok = await saveSettingsToRepo();
+        while (__settingsSaveQueue.length) {
+            const { resolve } = __settingsSaveQueue.shift();
+            try { resolve(ok); } catch (e) {}
+        }
+    } catch (err) {
+        while (__settingsSaveQueue.length) {
+            const { reject } = __settingsSaveQueue.shift();
+            try { reject(err); } catch (e) {}
+        }
+    } finally {
+        __settingsSaveInProgress = false;
+    }
+}
+
+// Export enqueue function for debugging/usage from other scopes
+try { window.enqueueSettingsSave = enqueueSettingsSave; } catch (e) { /* ignore */ }
+
+// Load settings.json from repo (if present) and merge into local config
+async function loadSettingsFromRepo() {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) {
+        dbg('loadSettingsFromRepo: missing credentials, skipping', 'debug');
+        return false;
+    }
+    const filePath = 'settings.json';
+    const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+    try {
+        const res = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+        if (!res.ok) {
+            dbg('loadSettingsFromRepo: settings file not found or inaccessible', 'debug');
+            return false;
+        }
+        const j = await res.json();
+        if (j && j.content) {
+            const decoded = decodeURIComponent(escape(atob(j.content)));
+            try {
+                const cfg = JSON.parse(decoded);
+                if (cfg && typeof cfg === 'object') {
+                    // Merge into local config using setConfig
+                    Object.keys(cfg).forEach(k => {
+                        try {
+                            // Avoid overwriting GitHub tokens stored in localStorage
+                            if (k === 'gt_token' || k === 'gt_repo') return;
+                            setConfig(k, cfg[k]);
+                        } catch (e) { dbg(`loadSettingsFromRepo: setConfig failed for ${k}`, 'warn'); }
+                    });
+                    dbg('Loaded settings from repo and merged into local config', 'info');
+                    return true;
+                }
+            } catch (e) {
+                dbg('loadSettingsFromRepo: failed to parse settings.json', 'error', e);
+                return false;
+            }
+        }
+        return false;
+    } catch (e) {
+        dbg('loadSettingsFromRepo error: ' + (e && e.message), 'error');
+        return false;
     }
 }
 
@@ -1122,18 +1375,46 @@ function toggleTokenVisibility() {
 }
 
 // --- CORE LOGIC ---
-function saveSettings() {
+async function validateRepoConnection() {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) return { ok: false, message: 'Missing token or repo' };
+    const url = `https://api.github.com/repos/${repo}`;
+    try {
+        const res = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+        let body = null;
+        try { body = await res.json(); } catch (e) { body = null; }
+        if (res.ok) return { ok: true };
+        const msg = (body && body.message) ? body.message : res.statusText || `HTTP ${res.status}`;
+        return { ok: false, message: msg + ` (${res.status})` };
+    } catch (e) {
+        return { ok: false, message: e && e.message ? e.message : 'Network error' };
+    }
+}
+
+async function saveSettings() {
     const t = document.getElementById('cfg-token').value.trim();
     const r = document.getElementById('cfg-repo').value.trim();
     const dailyBudgetInput = document.getElementById('cfg-daily-budget');
     const dailyBudget = dailyBudgetInput ? parseInt(dailyBudgetInput.value, 10) : null;
-    
+
     localStorage.setItem('gt_token', t);
     localStorage.setItem('gt_repo', r);
     if (!isNaN(dailyBudget) && dailyBudget > 0) setConfig('dailyBudget', dailyBudget);
-    
-    dbg("Settings saved");
+
+    dbg('Settings saved');
     toggleSettings();
+
+    // Validate GitHub connection and inform user
+    try {
+        const res = await validateRepoConnection();
+        if (res.ok) {
+            showNotification('GitHub repository validated', 'write');
+        } else {
+            showNotification(`GitHub validation failed: ${res.message}`, 'error');
+        }
+    } catch (e) { dbg('validateRepoConnection failed', 'warn', e); }
+
     // After saving settings, only fetch today's per-day file — never perform a full-folder fetch.
     fetchFromGit(true).catch(err => dbg(`fetchFromGit(today) after saving settings failed: ${err && err.message}`, 'warn'));
 }
@@ -2095,6 +2376,644 @@ async function addEntry() {
     }, 500);
 }
 
+    // ----------------------
+    // Daily weight helpers
+    // ----------------------
+
+    function showEntryTab() {
+        try {
+            const fc = document.getElementById('form-container');
+            const wc = document.getElementById('weight-container');
+            const tabE = document.getElementById('form-tab-entry');
+            const tabW = document.getElementById('form-tab-weight');
+            if (fc) fc.style.display = 'grid';
+            if (wc) wc.style.display = 'none';
+            if (tabE) tabE.classList.add('active');
+            if (tabW) tabW.classList.remove('active');
+        } catch (e) { dbg(`showEntryTab error: ${e && e.message}`, 'error'); }
+    }
+
+    function showWeightTab() {
+        try {
+            const fc = document.getElementById('form-container');
+            const wc = document.getElementById('weight-container');
+            const tabE = document.getElementById('form-tab-entry');
+            const tabW = document.getElementById('form-tab-weight');
+            if (fc) fc.style.display = 'none';
+            if (wc) wc.style.display = 'grid';
+            if (tabE) tabE.classList.remove('active');
+            if (tabW) tabW.classList.add('active');
+            updateWeightTabUI(getTodayString());
+        } catch (e) { dbg(`showWeightTab error: ${e && e.message}`, 'error'); }
+    }
+
+    function updateWeightTabUI(dateStr) {
+        try {
+            dbg(`updateWeightTabUI: refreshing UI for ${dateStr}`, 'debug');
+            const w = findWeightInEntriesForDate(dateStr);
+            const disp = document.getElementById('weight-saved-display');
+            const input = document.getElementById('weight-input');
+            const btn = document.getElementById('save-weight-btn');
+            const editBtn = document.getElementById('edit-weight-btn');
+            // If a weight exists for this date
+            if (w !== null && w !== undefined) {
+                dbg(`updateWeightTabUI: weight present ${w}`, 'debug');
+                if (disp) disp.textContent = `${Number(w).toFixed(1)} kg`;
+                // If currently in edit mode, allow updating
+                if (state.weightEditMode) {
+                    if (input) { input.value = Number(w).toFixed(1); input.disabled = false; }
+                    if (btn) { btn.disabled = false; btn.textContent = 'Update'; }
+                    if (editBtn) editBtn.style.display = 'none';
+                } else {
+                    if (input) { input.value = Number(w).toFixed(1); input.disabled = true; }
+                    if (btn) { btn.disabled = true; btn.textContent = 'Save'; }
+                    if (editBtn) editBtn.style.display = 'inline-block';
+                }
+            } else {
+                dbg('updateWeightTabUI: no weight present for date', 'debug');
+                if (disp) disp.textContent = '';
+                if (input) { input.value = ''; input.disabled = false; }
+                if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+                if (editBtn) editBtn.style.display = 'none';
+            }
+        } catch (e) { dbg(`updateWeightTabUI error: ${e && e.message}`, 'error'); }
+    }
+
+    function findWeightInEntriesForDate(dateStr) {
+        try {
+            for (const e of state.entries) {
+                if (!e) continue;
+                if (e._meta === 'dailyWeight') {
+                    const d = getEntryDate(e) || e._sourceDate || e.date;
+                    if (d === dateStr) {
+                        const w = (e.weightKg !== undefined) ? Number(e.weightKg) : (e.weight !== undefined ? Number(e.weight) : NaN);
+                        if (!isNaN(w)) {
+                            dbg(`findWeightInEntriesForDate: found weight for ${dateStr} => ${w}`, 'debug');
+                            return Math.round(w * 10) / 10;
+                        }
+                    }
+                }
+            }
+        } catch (e) { dbg(`findWeightInEntriesForDate error: ${e && e.message}`, 'error'); }
+        return null;
+    }
+
+    async function getDailyWeightForDate(dateStr) {
+        try {
+            dbg(`getDailyWeightForDate: checking local entries for ${dateStr}`, 'debug');
+            const local = findWeightInEntriesForDate(dateStr);
+            if (local !== null) { dbg(`getDailyWeightForDate: local hit ${dateStr} => ${local}`, 'debug'); return local; }
+            dbg(`getDailyWeightForDate: local miss, fetching ${dateStr} from GitHub`, 'debug');
+            const res = await fetchDateFromGit(dateStr);
+            dbg(`getDailyWeightForDate: fetchDateFromGit status=${res && res.status}`, 'debug');
+            if (res && res.status === 200 && Array.isArray(res.entries)) {
+                for (const e of res.entries) {
+                    if (e && e._meta === 'dailyWeight') {
+                        const w = (e.weightKg !== undefined) ? Number(e.weightKg) : (e.weight !== undefined ? Number(e.weight) : NaN);
+                        if (!isNaN(w)) { dbg(`getDailyWeightForDate: remote found ${dateStr} => ${w}`, 'debug'); return Math.round(w * 10) / 10; }
+                    }
+                }
+            }
+        } catch (e) { dbg(`getDailyWeightForDate error: ${e && e.message}`, 'error'); }
+        return null;
+    }
+
+    async function handleSaveWeight() {
+        try {
+            const input = document.getElementById('weight-input');
+            if (!input) return;
+            const raw = parseFloat(input.value);
+            if (!isFinite(raw)) { showNotification('Enter a valid numeric weight', 'error'); dbg('handleSaveWeight: invalid input=' + input.value, 'warn'); return; }
+            const rounded = Math.round(raw * 10) / 10;
+            dbg(`handleSaveWeight: input=${input.value} parsed=${raw} rounded=${rounded}`, 'info');
+            const dateStr = getTodayString();
+            const btn = document.getElementById('save-weight-btn');
+            if (btn) btn.classList.add('loading');
+            let res = null;
+            if (state.weightEditMode) {
+                dbg('handleSaveWeight: performing update (edit mode)', 'info');
+                res = await updateDailyWeightForDate(dateStr, rounded);
+            } else {
+                res = await saveDailyWeightForDate(dateStr, rounded);
+            }
+            if (btn) btn.classList.remove('loading');
+            if (res && res.ok) {
+                if (res.action === 'removed') showNotification('Weight removed', 'write');
+                else if (res.action === 'created' || res.action === 'updated') showNotification('Weight saved', 'write');
+                else if (res.action === 'noop') showNotification('No weight change', 'info');
+                dbg(`handleSaveWeight: result for ${dateStr} => ${rounded} action=${res.action}`, 'info');
+                // exit edit mode after successful update/creation
+                state.weightEditMode = false;
+                try { updateWeightTabUI(dateStr); } catch (e) {}
+            } else if (res && res.action === 'blocked') {
+                // Already notified by helper
+            } else {
+                showNotification('Failed to save weight', 'error');
+                dbg(`handleSaveWeight: saveDailyWeightForDate failed for ${dateStr}`, 'error');
+            }
+        } catch (e) { dbg(`handleSaveWeight error: ${e && e.message}`, 'error'); showNotification('Failed to save weight', 'error'); }
+    }
+
+    // Enable edit mode for the compact weight panel
+    function enableWeightEdit() {
+        try {
+            const dateStr = getTodayString();
+            dbg(`enableWeightEdit: enabling edit for ${dateStr}`, 'info');
+            state.weightEditMode = true;
+            updateWeightTabUI(dateStr);
+            const input = document.getElementById('weight-input');
+            if (input) { input.disabled = false; input.focus(); input.select(); }
+        } catch (e) { dbg(`enableWeightEdit error: ${e && e.message}`, 'error'); }
+    }
+
+    // Toggle handler for settings checkbox: allow editing older weights
+    async function toggleAllowEditWeights(checked) {
+        try {
+            // Update local config immediately so UI responds without delay
+            setConfig('allowEditOlderWeights', !!checked);
+            showNotification(checked ? 'Editing past weights enabled' : 'Editing past weights disabled', 'info');
+            // Refresh history so buttons appear/disappear immediately
+            try { renderHistory(); } catch (e) {}
+
+            // Attempt to persist settings to repo if credentials are configured
+            // Attempt to persist settings to repo if credentials are configured
+            const token = localStorage.getItem('gt_token');
+            const repo = localStorage.getItem('gt_repo');
+            if (token && repo) {
+                try {
+                    const v = await validateRepoConnection();
+                    if (!v.ok) {
+                        showNotification(`Cannot persist to repo: ${v.message}`, 'error');
+                        return;
+                    }
+                } catch (e) { /* continue to attempt save */ }
+                const ok = await enqueueSettingsSave();
+                if (ok) {
+                    showNotification('Settings persisted to repository', 'write');
+                } else {
+                    showNotification('Failed to persist settings to repo — saved locally', 'error');
+                }
+            } else {
+                // No credentials; inform the user that this is local-only
+                showNotification('Saved locally. Configure GitHub to persist settings.', 'info');
+            }
+        } catch (e) { dbg(`toggleAllowEditWeights error: ${e && e.message}`, 'error'); }
+    }
+
+    // Toggle handler for settings checkbox: control full toasts vs compact dot
+    async function toggleShowToasts(checked) {
+        try {
+            setConfig('showToasts', !!checked);
+            // If enabling, show a full toast to confirm (forceFull ensures visibility)
+            if (checked) showNotification('Notifications enabled', 'info', true);
+            else showNotification('Notifications disabled', 'info');
+
+            // Attempt to persist settings to repo if credentials are configured
+            // Attempt to persist settings to repo if credentials are configured
+            const token = localStorage.getItem('gt_token');
+            const repo = localStorage.getItem('gt_repo');
+            if (token && repo) {
+                try {
+                    const v = await validateRepoConnection();
+                    if (!v.ok) {
+                        showNotification(`Cannot persist to repo: ${v.message}`, 'error');
+                        return;
+                    }
+                } catch (e) { /* continue to attempt save */ }
+                const ok = await enqueueSettingsSave();
+                if (ok) {
+                    showNotification('Settings persisted to repository', 'write');
+                } else {
+                    showNotification('Failed to persist settings to repo — saved locally', 'error');
+                }
+            } else {
+                showNotification('Saved locally. Configure GitHub to persist settings.', 'info');
+            }
+        } catch (e) { dbg(`toggleShowToasts error: ${e && e.message}`, 'error'); }
+    }
+
+    // Open the in-page weight edit modal for a given date
+    function editWeightForDate(dateStr) {
+        openWeightEditModal(dateStr);
+    }
+
+    async function openWeightEditModal(dateStr) {
+        try {
+            const today = getTodayString();
+            if (dateStr !== today && !getConfig('allowEditOlderWeights')) {
+                showNotification('Editing past weights is disabled in Settings', 'error');
+                return;
+            }
+            const modal = document.getElementById('weight-edit-modal');
+            const input = document.getElementById('weight-edit-input');
+            if (!modal || !input) {
+                showNotification('Edit modal not available', 'error');
+                return;
+            }
+            // Prefer local value, fall back to remote
+            let current = findWeightInEntriesForDate(dateStr);
+            if (current === null || current === undefined) {
+                current = await getDailyWeightForDate(dateStr);
+            }
+            // Allow opening the modal even if there's no recorded weight yet
+            state.weightEditTargetDate = dateStr;
+            if (current === null || current === undefined) {
+                input.value = '';
+            } else {
+                input.value = Number(current).toFixed(1);
+            }
+            modal.style.display = 'flex';
+            setTimeout(() => { try { input.focus(); input.select(); } catch (e) {} }, 50);
+        } catch (e) {
+            dbg(`openWeightEditModal error: ${e && e.message}`, 'error');
+            showNotification('Error opening edit modal', 'error');
+        }
+    }
+
+    function closeWeightEditModal() {
+        try {
+            const modal = document.getElementById('weight-edit-modal');
+            const input = document.getElementById('weight-edit-input');
+            if (modal) modal.style.display = 'none';
+            if (input) input.value = '';
+            state.weightEditTargetDate = null;
+        } catch (e) { dbg(`closeWeightEditModal error: ${e && e.message}`, 'error'); }
+    }
+
+    async function saveWeightFromModal() {
+        try {
+            const input = document.getElementById('weight-edit-input');
+            const saveBtn = document.getElementById('weight-edit-save');
+            const dateStr = state.weightEditTargetDate || getTodayString();
+            if (!input) return;
+            const raw = parseFloat(input.value);
+            if (!isFinite(raw)) { showNotification('Enter a valid numeric weight', 'error'); return; }
+            const rounded = Math.round(raw * 10) / 10;
+            if (saveBtn) saveBtn.classList.add('loading');
+            const res = await updateDailyWeightForDate(dateStr, rounded);
+            if (saveBtn) saveBtn.classList.remove('loading');
+            if (res && res.ok) {
+                if (res.action === 'removed') showNotification('Weight removed', 'write');
+                else if (res.action === 'created' || res.action === 'updated') showNotification('Weight updated', 'write');
+                else if (res.action === 'noop') showNotification('No weight change', 'info');
+                closeWeightEditModal();
+                try {
+                    const modalOpen = document.getElementById('weight-modal')?.style.display === 'flex';
+                    if (modalOpen && state.dateRangeStart && state.dateRangeEnd) renderWeightGraph(state.dateRangeStart, state.dateRangeEnd);
+                } catch (e) {}
+            } else if (res && res.action === 'blocked') {
+                // blocked by settings; message already shown in helper
+            } else {
+                showNotification('Failed to update weight', 'error');
+            }
+        } catch (e) {
+            dbg(`saveWeightFromModal error: ${e && e.message}`, 'error');
+            showNotification('Failed to update weight', 'error');
+            const saveBtn = document.getElementById('weight-edit-save');
+            if (saveBtn) saveBtn.classList.remove('loading');
+        }
+    }
+
+    // Create-only: double-check remote date file for existing dailyWeight before writing
+    async function saveDailyWeightForDate(dateStr, weightKg) {
+        // Enforce settings: disallow saving weights for past dates when disabled
+        try {
+            const today = getTodayString();
+            if (dateStr !== today && !getConfig('allowEditOlderWeights')) {
+                showNotification('Saving weight for past dates is disabled in Settings', 'error');
+                dbg(`saveDailyWeightForDate blocked by settings for ${dateStr}`, 'info');
+                return { ok: false, action: 'blocked' };
+            }
+        } catch (e) { dbg(`saveDailyWeightForDate pre-check error: ${e && e.message}`, 'error'); }
+        try {
+            const rounded = Math.round(Number(weightKg) * 10) / 10;
+            dbg(`saveDailyWeightForDate: attempting save for ${dateStr} weightKg=${rounded}`, 'info');
+            // If weight is zero, treat as removal request: delete any existing dailyWeight meta
+            if (rounded === 0) {
+                dbg(`saveDailyWeightForDate: zero weight detected; delegating to removal for ${dateStr}`, 'info');
+                return await removeDailyWeightForDate(dateStr);
+            }
+            const res = await fetchDateFromGit(dateStr);
+            dbg(`saveDailyWeightForDate: fetchDateFromGit returned status=${res && res.status}`, 'debug');
+            if (!res || res.status === 0) {
+                dbg('saveDailyWeightForDate: fetchDateFromGit returned no usable response; likely missing credentials or network error', 'error');
+                showNotification('Cannot access GitHub (missing credentials or network error)', 'error');
+                return { ok: false, action: 'error' };
+            }
+            if (res.status === 200 && Array.isArray(res.entries)) {
+                const already = res.entries.some(x => x && x._meta === 'dailyWeight');
+                dbg(`saveDailyWeightForDate: remote file entries=${res.entries.length} alreadyWeight=${already}`, 'debug');
+                if (already) {
+                    showNotification('Weight already recorded for this date', 'error');
+                    updateWeightTabUI(dateStr);
+                    return { ok: false, action: 'exists' };
+                }
+                const finalArray = res.entries.slice();
+                const newMeta = { _meta: 'dailyWeight', weightKg: rounded, timestamp: new Date().toISOString(), date: dateStr };
+                finalArray.push(newMeta);
+                dbg('saveDailyWeightForDate: pushing updated file to repo', 'info');
+                const ok = await pushDateFile(dateStr, finalArray);
+                dbg(`saveDailyWeightForDate: pushDateFile result=${ok}`, ok ? 'info' : 'error');
+                if (ok) {
+                    // merge into local state (avoid duplicates)
+                    state.entries = state.entries.filter(e => !(e && e._meta === 'dailyWeight' && getEntryDate(e) === dateStr));
+                    state.entries.push({ ...newMeta, _sourceDate: dateStr });
+                    render();
+                    renderHistory();
+                    updateWeightTabUI(dateStr);
+                    return { ok: true, action: 'created' };
+                }
+                showNotification('Failed to save weight to repo', 'error');
+                return { ok: false, action: 'error' };
+            } else if (res.status === 404) {
+                // no file exists; create new per-day file with just the meta
+                const newMeta = { _meta: 'dailyWeight', weightKg: rounded, timestamp: new Date().toISOString(), date: dateStr };
+                dbg('saveDailyWeightForDate: no remote file exists; creating new file with weight meta', 'info');
+                const ok = await pushDateFile(dateStr, [newMeta]);
+                dbg(`saveDailyWeightForDate: pushDateFile (create) result=${ok}`, ok ? 'info' : 'error');
+                if (ok) {
+                    state.entries = state.entries.filter(e => !(e && e._meta === 'dailyWeight' && getEntryDate(e) === dateStr));
+                    state.entries.push({ ...newMeta, _sourceDate: dateStr });
+                    render();
+                    renderHistory();
+                    updateWeightTabUI(dateStr);
+                    return { ok: true, action: 'created' };
+                }
+                showNotification('Failed to create date file for weight', 'error');
+                return { ok: false, action: 'error' };
+            } else {
+                dbg(`saveDailyWeightForDate: unexpected fetchDateFromGit status=${res.status}`, 'error');
+                showNotification('Failed to verify remote date file', 'error');
+                return { ok: false, action: 'error' };
+            }
+        } catch (e) {
+            dbg(`saveDailyWeightForDate error: ${e && e.message}`, 'error');
+            showNotification('Error while saving weight', 'error');
+            return { ok: false, action: 'error' };
+        }
+    }
+
+    // Remove dailyWeight meta from a date file (and delete file if empty)
+    async function removeDailyWeightForDate(dateStr) {
+        try {
+            const today = getTodayString();
+            if (dateStr !== today && !getConfig('allowEditOlderWeights')) {
+                showNotification('Editing past weights is disabled in Settings', 'error');
+                dbg(`removeDailyWeightForDate blocked by settings for ${dateStr}`, 'info');
+                return { ok: false, action: 'blocked' };
+            }
+        } catch (e) { dbg(`removeDailyWeightForDate pre-check error: ${e && e.message}`, 'error'); }
+
+        try {
+            const res = await fetchDateFromGit(dateStr);
+            if (!res || res.status === 0) {
+                dbg('removeDailyWeightForDate: fetch failed; cannot remove', 'error');
+                showNotification('Cannot access GitHub (missing credentials or network error)', 'error');
+                return { ok: false, action: 'error' };
+            }
+            if (res.status === 200 && Array.isArray(res.entries)) {
+                const entries = res.entries.slice();
+                const idx = entries.findIndex(x => x && x._meta === 'dailyWeight');
+                if (idx >= 0) {
+                    entries.splice(idx, 1);
+                    dbg(`removeDailyWeightForDate: removing dailyWeight at index ${idx} for ${dateStr}`, 'info');
+                    const ok = await pushDateFile(dateStr, entries);
+                    dbg(`removeDailyWeightForDate: pushDateFile result=${ok}`, ok ? 'info' : 'error');
+                    if (ok) {
+                        state.entries = state.entries.filter(e => !(e && e._meta === 'dailyWeight' && getEntryDate(e) === dateStr));
+                        render(); renderHistory(); updateWeightTabUI(dateStr);
+                        return { ok: true, action: 'removed' };
+                    }
+                    showNotification('Failed to remove weight from repo', 'error');
+                    return { ok: false, action: 'error' };
+                } else {
+                    // No remote meta present; ensure local is cleaned
+                    state.entries = state.entries.filter(e => !(e && e._meta === 'dailyWeight' && getEntryDate(e) === dateStr));
+                    render(); renderHistory(); updateWeightTabUI(dateStr);
+                    return { ok: true, action: 'noop' };
+                }
+            } else if (res.status === 404) {
+                // Nothing remote; cleanup local state if any
+                state.entries = state.entries.filter(e => !(e && e._meta === 'dailyWeight' && getEntryDate(e) === dateStr));
+                render(); renderHistory(); updateWeightTabUI(dateStr);
+                return { ok: true, action: 'noop' };
+            } else {
+                dbg(`removeDailyWeightForDate: unexpected status=${res && res.status}`, 'error');
+                showNotification('Failed to verify remote date file', 'error');
+                return { ok: false, action: 'error' };
+            }
+        } catch (err) {
+            dbg(`removeDailyWeightForDate error: ${err && err.message}`, 'error');
+            showNotification('Error while removing weight', 'error');
+            return { ok: false, action: 'error' };
+        }
+    }
+
+    // Update existing weight entry in the per-day file (edit flow)
+    async function updateDailyWeightForDate(dateStr, weightKg) {
+        // Enforce settings: disallow updating weights for past dates when disabled
+        try {
+            const today = getTodayString();
+            if (dateStr !== today && !getConfig('allowEditOlderWeights')) {
+                showNotification('Editing weight for past dates is disabled in Settings', 'error');
+                dbg(`updateDailyWeightForDate blocked by settings for ${dateStr}`, 'info');
+                return false;
+            }
+        } catch (e) { dbg(`updateDailyWeightForDate pre-check error: ${e && e.message}`, 'error'); }
+        try {
+            const rounded = Math.round(Number(weightKg) * 10) / 10;
+            dbg(`updateDailyWeightForDate: attempting update for ${dateStr} weightKg=${rounded}`, 'info');
+            // If weight is zero, treat as removal
+            if (rounded === 0) {
+                dbg(`updateDailyWeightForDate: zero weight detected; delegating to removal for ${dateStr}`, 'info');
+                return await removeDailyWeightForDate(dateStr);
+            }
+            const res = await fetchDateFromGit(dateStr);
+            dbg(`updateDailyWeightForDate: fetchDateFromGit status=${res && res.status}`, 'debug');
+            if (!res || res.status === 0) {
+                dbg('updateDailyWeightForDate: fetch failed; cannot update', 'error');
+                showNotification('Cannot access GitHub (missing credentials or network error)', 'error');
+                return { ok: false, action: 'error' };
+            }
+            const newMeta = { _meta: 'dailyWeight', weightKg: rounded, timestamp: new Date().toISOString(), date: dateStr };
+            if (res.status === 200 && Array.isArray(res.entries)) {
+                const entries = res.entries.slice();
+                const idx = entries.findIndex(x => x && x._meta === 'dailyWeight');
+                if (idx >= 0) {
+                    entries[idx] = { ...entries[idx], ...newMeta };
+                    dbg(`updateDailyWeightForDate: replacing remote meta at index ${idx}`, 'debug');
+                } else {
+                    dbg('updateDailyWeightForDate: no existing meta found remotely; appending new meta', 'warn');
+                    entries.push(newMeta);
+                }
+                const ok = await pushDateFile(dateStr, entries);
+                dbg(`updateDailyWeightForDate: pushDateFile result=${ok}`, ok ? 'info' : 'error');
+                if (ok) {
+                    // update local state
+                    state.entries = state.entries.filter(e => !(e && e._meta === 'dailyWeight' && getEntryDate(e) === dateStr));
+                    state.entries.push({ ...newMeta, _sourceDate: dateStr });
+                    render(); renderHistory(); updateWeightTabUI(dateStr);
+                    return { ok: true, action: (idx >= 0 ? 'updated' : 'created') };
+                }
+                showNotification('Failed to update weight on repo', 'error');
+                return { ok: false, action: 'error' };
+            } else if (res.status === 404) {
+                // no file exists remotely; create one
+                dbg('updateDailyWeightForDate: remote file missing; creating new file with updated meta', 'info');
+                const ok = await pushDateFile(dateStr, [newMeta]);
+                dbg(`updateDailyWeightForDate: pushDateFile (create) result=${ok}`, ok ? 'info' : 'error');
+                if (ok) {
+                    state.entries = state.entries.filter(e => !(e && e._meta === 'dailyWeight' && getEntryDate(e) === dateStr));
+                    state.entries.push({ ...newMeta, _sourceDate: dateStr });
+                    render(); renderHistory(); updateWeightTabUI(dateStr);
+                    return { ok: true, action: 'created' };
+                }
+                showNotification('Failed to create date file for weight', 'error');
+                return { ok: false, action: 'error' };
+            } else {
+                dbg(`updateDailyWeightForDate: unexpected fetch status=${res.status}`, 'error');
+                showNotification('Failed to verify remote date file', 'error');
+                return { ok: false, action: 'error' };
+            }
+        } catch (e) {
+            dbg(`updateDailyWeightForDate error: ${e && e.message}`, 'error');
+            showNotification('Error while updating weight', 'error');
+            return { ok: false, action: 'error' };
+        }
+    }
+
+    function openWeightModalForRange() {
+        try {
+            if (!state.dateRangeStart || !state.dateRangeEnd) { showNotification('Select a date range first', 'error'); return; }
+            const modal = document.getElementById('weight-modal');
+            if (!modal) return;
+            modal.style.display = 'flex';
+            // Render graph inside modal
+            renderWeightGraph(state.dateRangeStart, state.dateRangeEnd);
+        } catch (e) { dbg(`openWeightModalForRange error: ${e && e.message}`, 'error'); }
+    }
+
+    function closeWeightModal() {
+        try {
+            const modal = document.getElementById('weight-modal');
+            if (modal) modal.style.display = 'none';
+            if (typeof charts !== 'undefined' && charts && charts.weight) {
+                try { charts.weight.destroy(); } catch (e) { /* ignore */ }
+                delete charts.weight;
+            }
+        } catch (e) { dbg(`closeWeightModal error: ${e && e.message}`, 'error'); }
+    }
+
+    // Open Toggles popup (contains notification and weight toggles)
+    function openTogglesPopup() {
+        try {
+            console.log('[openTogglesPopup] called');
+            let modal = document.getElementById('toggles-modal');
+            if (!modal) { console.warn('[openTogglesPopup] toggles-modal element not found'); return; }
+            // If modal is not a direct child of body, move it to body to avoid stacking/overflow issues
+            try {
+                if (modal.parentElement !== document.body) {
+                    document.body.appendChild(modal);
+                    console.log('[openTogglesPopup] appended modal to document.body');
+                }
+            } catch (e) { console.warn('[openTogglesPopup] append to body failed', e); }
+
+            // Ensure checkbox states reflect current config
+            try { const t = document.getElementById('cfg-show-toasts'); if (t) t.checked = !!getConfig('showToasts'); } catch (e) { console.warn(e); }
+            try { const w = document.getElementById('cfg-allow-edit-weights'); if (w) w.checked = !!getConfig('allowEditOlderWeights'); } catch (e) { console.warn(e); }
+
+            // Force visible and on top
+            modal.style.display = 'flex';
+            modal.style.zIndex = '999999';
+            modal.style.pointerEvents = 'auto';
+            try { const focusable = modal.querySelector('input, button, [tabindex]'); if (focusable) focusable.focus(); } catch (e) {}
+            console.log('[openTogglesPopup] modal displayed');
+        } catch (e) { console.error('[openTogglesPopup] error', e); dbg(`openTogglesPopup error: ${e && e.message}`, 'error'); }
+    }
+
+    function closeTogglesPopup() {
+        try {
+            console.log('[closeTogglesPopup] called');
+            const modal = document.getElementById('toggles-modal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        } catch (e) { console.error('[closeTogglesPopup] error', e); dbg(`closeTogglesPopup error: ${e && e.message}`, 'error'); }
+    }
+
+// Export toggle functions immediately to the global scope so inline handlers work
+try {
+    if (typeof openTogglesPopup === 'function') window.openTogglesPopup = openTogglesPopup;
+    if (typeof closeTogglesPopup === 'function') window.closeTogglesPopup = closeTogglesPopup;
+    if (typeof toggleShowToasts === 'function') window.toggleShowToasts = toggleShowToasts;
+    if (typeof toggleAllowEditWeights === 'function') window.toggleAllowEditWeights = toggleAllowEditWeights;
+} catch (e) { dbg('Export to window failed', 'debug', e); }
+
+    async function renderWeightGraph(startDate, endDate) {
+        try {
+            dbg(`renderWeightGraph: start ${startDate} -> ${endDate}`, 'info');
+            const canvas = document.getElementById('chart-weight-trend');
+            if (!canvas) return;
+            // Build inclusive date array (ascending)
+            const dates = [];
+            let cur = new Date(startDate);
+            const endD = new Date(endDate);
+            while (cur <= endD) {
+                dates.push(formatDateLocal(cur));
+                cur.setDate(cur.getDate() + 1);
+            }
+
+            // Fetch weights (use cache first)
+            const weightPromises = dates.map(d => getDailyWeightForDate(d));
+            const weights = await Promise.all(weightPromises);
+
+            // Destroy existing chart if present
+            if (typeof charts !== 'undefined' && charts && charts.weight) {
+                try { charts.weight.destroy(); } catch (e) { /* ignore */ }
+                delete charts.weight;
+            }
+
+            const ctx = canvas.getContext('2d');
+            charts = charts || {};
+            charts.weight = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [{
+                        label: 'Weight (kg)',
+                        data: weights,
+                        borderColor: '#007aff',
+                        backgroundColor: 'rgba(0,122,255,0.08)',
+                        fill: true,
+                        tension: 0.4,
+                        spanGaps: false,
+                        pointRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e' }, grid: { color: 'rgba(128,128,128,0.06)' } },
+                        y: { beginAtZero: false, ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e' }, title: { display: true, text: 'kg' }, grid: { color: 'rgba(128,128,128,0.06)' } }
+                    },
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y ?? ''} kg` } } }
+                }
+            });
+
+            // Show start/end weights (print values for the exact start/end dates)
+            const startDisplay = document.getElementById('weight-modal-start');
+            const endDisplay = document.getElementById('weight-modal-end');
+            const startW = weights.length > 0 ? weights[0] : null;
+            const endW = weights.length > 0 ? weights[weights.length - 1] : null;
+            if (startDisplay) startDisplay.textContent = (startW !== null && startW !== undefined) ? `${Number(startW).toFixed(1)} kg` : '—';
+            if (endDisplay) endDisplay.textContent = (endW !== null && endW !== undefined) ? `${Number(endW).toFixed(1)} kg` : '—';
+
+        } catch (e) { dbg(`renderWeightGraph error: ${e && e.message}`, 'error'); }
+        finally { dbg(`renderWeightGraph: complete ${startDate} -> ${endDate}`, 'info'); }
+    }
+
 // --- HISTORY PAGE (refactored into helpers) ---
 function ensureHistoryPrefetchIfNeeded() {
     try {
@@ -2577,13 +3496,55 @@ function renderHistory() {
 
     const isRangeView = state.dateRangeStart && state.dateRangeEnd && state.dateRangeStart !== state.dateRangeEnd;
 
+    // Show / hide the View weight graph button when a multi-day range is active
+    try {
+        const viewBtn = document.getElementById('view-weight-graph-btn');
+        if (viewBtn) {
+            viewBtn.style.display = isRangeView ? 'inline-block' : 'none';
+            viewBtn.disabled = !isRangeView;
+        }
+    } catch (e) { /* ignore DOM issues */ }
+
     // Render each date group on the page
     pageDates.forEach(dateStr => {
         const group = groups[dateStr] || [];
-        const header = document.createElement('div');
-        header.style.cssText = 'font-weight:700; margin: 12px 0 8px 0;';
-        header.textContent = `${dateStr} (${group.length})`;
-        container.appendChild(header);
+        // Exclude meta weight entries from the visible count
+        const visibleCount = group.filter(e => !(e && e._meta === 'dailyWeight')).length;
+        // Build a header row with optional 'Edit weight' action
+        const headerWrap = document.createElement('div');
+        headerWrap.style.cssText = 'display:flex; justify-content:space-between; align-items:center; margin: 12px 0 8px 0; gap:12px;';
+        const left = document.createElement('div');
+        left.style.cssText = 'font-weight:700;';
+        let headerText = `${dateStr} (${visibleCount})`;
+        // If a single-day view, append the day's weight if present
+        let weightForDate = null;
+        try {
+            weightForDate = findWeightInEntriesForDate(dateStr);
+            if (state.dateRangeStart === state.dateRangeEnd && state.dateRangeStart === dateStr) {
+                headerText += weightForDate !== null && weightForDate !== undefined ? ` — ${Number(weightForDate).toFixed(1)} kg` : ` — No weight`;
+            } else {
+                if (weightForDate !== null && weightForDate !== undefined) headerText += ` — ${Number(weightForDate).toFixed(1)} kg`;
+            }
+        } catch (e) { /* ignore */ }
+        left.textContent = headerText;
+        headerWrap.appendChild(left);
+
+        // Show 'Edit/Add weight' button when editing is allowed (even if no weight exists)
+        try {
+            const allowEdit = (dateStr === getTodayString()) || getConfig('allowEditOlderWeights');
+            if (allowEdit) {
+                const editBtn = document.createElement('button');
+                editBtn.className = 'btn-secondary';
+                editBtn.style.cssText = 'padding:8px 12px; min-width:96px; font-size:13px;';
+                editBtn.textContent = (weightForDate !== null && weightForDate !== undefined) ? 'Edit weight' : 'Add weight';
+                editBtn.addEventListener('click', (ev) => { ev.preventDefault(); editWeightForDate(dateStr); });
+                // Fallback: ensure onclick also wired (helps environments where addEventListener may not attach)
+                editBtn.onclick = function(ev) { ev && ev.preventDefault(); openWeightEditModal(dateStr); };
+                headerWrap.appendChild(editBtn);
+            }
+        } catch (e) { /* ignore DOM issues */ }
+
+        container.appendChild(headerWrap);
 
         group.sort((a, b) => {
             const ta = new Date(a.timestamp || (a.date + ' ' + (a.time || '00:00'))).getTime();
@@ -2592,6 +3553,8 @@ function renderHistory() {
         });
 
         group.forEach(entry => {
+            // Skip dailyWeight meta entries — they are rendered in the header only
+            if (entry && entry._meta === 'dailyWeight') return;
             const globalIndex = state.entries.indexOf(entry);
             if (globalIndex === -1) dbg(`Warning: entry for date ${dateStr} not found in state.entries via indexOf — possible identity mismatch`, 'warn');
             const card = createEntryCard(entry, globalIndex, isRangeView, dateStr);
@@ -3779,7 +4742,41 @@ window.onload = async () => {
             if (b) budgetInput.value = b;
         } catch (e) { /* ignore */ }
     }
-    
+    // Attempt to load persisted settings from the repository (if configured)
+    try { await loadSettingsFromRepo(); } catch (e) { dbg('loadSettingsFromRepo failed', 'debug', e); }
+
+    // Initialize weight-editing setting checkbox from merged config
+    try {
+        const allowChk = document.getElementById('cfg-allow-edit-weights');
+        if (allowChk) {
+            allowChk.checked = !!getConfig('allowEditOlderWeights');
+            try { allowChk.addEventListener('change', (e) => toggleAllowEditWeights(e.target.checked)); } catch (e) {}
+        }
+    } catch (e) { /* ignore */ }
+
+    // Initialize show-toasts setting checkbox
+    try {
+        const toastChk = document.getElementById('cfg-show-toasts');
+        if (toastChk) {
+            toastChk.checked = !!getConfig('showToasts');
+            try { toastChk.addEventListener('change', (e) => toggleShowToasts(e.target.checked)); } catch (e) {}
+        }
+    } catch (e) { /* ignore */ }
+
+    // Attach click handler to Toggles button as a robust fallback to inline onclick
+    try {
+        const openBtn = document.getElementById('open-toggles-btn');
+        if (openBtn) openBtn.addEventListener('click', (e) => { try { openTogglesPopup(); } catch (err) { dbg('open-toggles-btn click failed', 'error', err); } });
+    } catch (e) { /* ignore */ }
+
+    // Ensure popup/toggle functions are available globally for inline onclick attributes
+    try {
+        if (typeof openTogglesPopup === 'function') window.openTogglesPopup = openTogglesPopup;
+        if (typeof closeTogglesPopup === 'function') window.closeTogglesPopup = closeTogglesPopup;
+        if (typeof toggleShowToasts === 'function') window.toggleShowToasts = toggleShowToasts;
+        if (typeof toggleAllowEditWeights === 'function') window.toggleAllowEditWeights = toggleAllowEditWeights;
+    } catch (e) { dbg('Failed to export toggle functions to window', 'debug', e); }
+
     // Load schema first
     const schemaLoaded = await loadSchema();
     
