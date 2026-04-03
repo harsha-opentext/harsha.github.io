@@ -2941,12 +2941,48 @@ async function addEntry() {
         } catch (e) { console.error('[closeTogglesPopup] error', e); dbg(`closeTogglesPopup error: ${e && e.message}`, 'error'); }
     }
 
+    // Hard refresh the app: attempt to clear Cache Storage and reload with a cache-busting param
+    async function hardRefreshApp() {
+        try {
+            const ok = confirm('Hard refresh will clear cached app resources (if possible) and reload from server. Continue?');
+            if (!ok) return;
+            try { showNotification('Clearing caches and reloading…', 'read'); } catch (e) {}
+            // Close toggles UI to avoid visual artifacts
+            try { closeTogglesPopup(); } catch (e) {}
+
+            if ('caches' in window) {
+                try {
+                    const names = await caches.keys();
+                    await Promise.all(names.map(n => caches.delete(n)));
+                    dbg('Cleared Cache Storage entries', 'info');
+                } catch (e) { dbg('Failed to clear Cache Storage: ' + (e && e.message), 'warn'); }
+            } else {
+                dbg('Cache Storage API not available in this browser', 'debug');
+            }
+
+            // Force navigation with a cache-busting query parameter
+            try {
+                const url = new URL(window.location.href);
+                url.searchParams.set('_cachebust', Date.now().toString());
+                // Use location.assign so history behaves like a normal navigation
+                window.location.assign(url.toString());
+            } catch (e) {
+                // Fallback: use location.reload() if URL construction fails
+                try { window.location.reload(); } catch (ex) { dbg('Reload fallback failed', 'error', ex); }
+            }
+        } catch (e) {
+            dbg('hardRefreshApp failed: ' + (e && e.message), 'error', e);
+            try { showNotification('Hard refresh failed', 'error', true); } catch (ex) {}
+        }
+    }
+
 // Export toggle functions immediately to the global scope so inline handlers work
 try {
     if (typeof openTogglesPopup === 'function') window.openTogglesPopup = openTogglesPopup;
     if (typeof closeTogglesPopup === 'function') window.closeTogglesPopup = closeTogglesPopup;
     if (typeof toggleShowToasts === 'function') window.toggleShowToasts = toggleShowToasts;
     if (typeof toggleAllowEditWeights === 'function') window.toggleAllowEditWeights = toggleAllowEditWeights;
+    if (typeof hardRefreshApp === 'function') window.hardRefreshApp = hardRefreshApp;
 } catch (e) { dbg('Export to window failed', 'debug', e); }
 
     async function renderWeightGraph(startDate, endDate) {
