@@ -371,6 +371,10 @@
                 
                     <div id="csv-preview-section" style="display: none;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 16px; background: var(--bg); border-radius: 12px;">
+                            <div>
+                                <h3 style="margin: 0 0 4px 0; font-size: 18px;">Preview</h3>
+                                <p style="margin: 0; color: var(--text-secondary); font-size: 14px;"><span id="csv-count">0</span> entries ready to import</p>
+                            </div>
                         </div>
                         <div style="display: flex; gap: 8px;">
                             <button class="btn-secondary" onclick="backToCsvInput()" style="padding: 10px 20px;">← Back</button>
@@ -494,6 +498,10 @@
                                         <span class="slider"></span>
                                     </label>
                                 </label>
+                                <div style="margin-top:8px;">
+                                    <button id="hard-refresh-btn" class="btn-danger" onclick="window.hardRefreshApp()" style="width:100%; padding:10px 12px;">🔁 Hard Refresh App</button>
+                                    <div style="font-size:12px; color:var(--text-secondary); margin-top:8px;">Reloads the app and attempts to bypass browser cache. Useful for installed web-apps (iPhone Safari).</div>
+                                </div>
                             </div>
                         </div>
                         <div style="padding: 12px; display:flex; justify-content:flex-end; gap:8px;">
