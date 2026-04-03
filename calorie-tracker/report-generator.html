@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Report Generator — Calorie Tracker Pro</title>
+    <script src="report-generator.js" defer></script>
+    <style>
+        :root {
+            --bg: #f4f7f6;
+            --card-bg: #ffffff;
+            --text: #1c1c1e;
+            --text-secondary: #8e8e93;
+            --primary: #007aff;
+            --secondary: #5856d6;
+            --danger: #ff3b30;
+            --green: #34c759;
+            --orange: #ff9500;
+            --border: #d1d1d6;
+            --surface-2: #f2f2f7;
+            --shadow: 0 2px 10px rgba(0,0,0,0.08);
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #000000;
+                --card-bg: #1c1c1e;
+                --text: #ffffff;
+                --text-secondary: #8e8e93;
+                --primary: #0a84ff;
+                --secondary: #5e5ce6;
+                --danger: #ff453a;
+                --green: #30d158;
+                --orange: #ff9f0a;
+                --border: #38383a;
+                --surface-2: #2c2c2e;
+                --shadow: 0 2px 10px rgba(0,0,0,0.4);
+            }
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 24px 20px 60px;
+            max-width: 760px;
+            margin: 0 auto;
+        }
+
+        /* ── Header ── */
+        .rg-header { margin-bottom: 24px; }
+        .rg-title { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+        .rg-subtitle { font-size: 14px; color: var(--text-secondary); margin-top: 4px; line-height: 1.5; }
+
+        /* ── Card ── */
+        .rg-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+            margin-bottom: 20px;
+        }
+        .rg-card-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-secondary);
+            margin-bottom: 14px;
+        }
+
+        /* ── Controls ── */
+        .rg-controls { border-top: 3px solid var(--secondary); }
+        .rg-presets {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+        .rg-preset-btn {
+            background: var(--surface-2);
+            border: 1.5px solid var(--border);
+            border-radius: 50px;
+            padding: 7px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text);
+            cursor: pointer;
+            font-family: inherit;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .rg-preset-btn:hover, .rg-preset-btn.active {
+            background: var(--secondary);
+            border-color: var(--secondary);
+            color: #fff;
+        }
+        .rg-date-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .rg-field { display: flex; flex-direction: column; gap: 6px; }
+        .rg-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+        input[type="date"] {
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            font-size: 15px;
+            background: var(--surface-2);
+            color: var(--text);
+            width: 100%;
+            font-family: inherit;
+            min-height: 44px;
+            outline: none;
+            -webkit-appearance: none; appearance: none;
+        }
+        input[type="date"]:focus { outline: 2px solid var(--secondary); outline-offset: -2px; border-color: transparent; }
+        .rg-generate-btn {
+            width: 100%;
+            background: var(--secondary);
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            padding: 14px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            font-family: inherit;
+            min-height: 48px;
+            transition: opacity 0.15s, transform 0.1s;
+        }
+        .rg-generate-btn:active { transform: scale(0.98); opacity: 0.88; }
+        .rg-generate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* ── Progress / Loading ── */
+        .rg-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+            gap: 14px;
+        }
+        .rg-spinner {
+            width: 38px; height: 38px;
+            border: 4px solid var(--border);
+            border-top-color: var(--secondary);
+            border-radius: 50%;
+            animation: rg-spin 0.7s linear infinite;
+        }
+        @keyframes rg-spin { to { transform: rotate(360deg); } }
+        .rg-loading-msg { color: var(--text-secondary); font-size: 14px; font-weight: 500; }
+
+        /* ── Summary stats ── */
+        .rg-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 10px;
+        }
+        .rg-stat-chip {
+            background: var(--surface-2);
+            border-radius: 12px;
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .rg-stat-val { font-size: 20px; font-weight: 800; color: var(--secondary); }
+        .rg-stat-lbl {
+            font-size: 10px; font-weight: 700; color: var(--text-secondary);
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+
+        /* ── Date range info ── */
+        .rg-range-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .rg-range-badge {
+            background: rgba(88,86,214,0.1);
+            color: var(--secondary);
+            border-radius: 8px;
+            padding: 4px 10px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        /* ── Download actions ── */
+        .rg-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .rg-download-btn {
+            flex: 1;
+            min-width: 140px;
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            padding: 13px 18px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            font-family: inherit;
+            transition: opacity 0.15s, transform 0.1s;
+        }
+        .rg-download-btn:active { transform: scale(0.97); }
+        .rg-download-btn.outline {
+            background: transparent;
+            border: 1.5px solid var(--primary);
+            color: var(--primary);
+        }
+
+        /* ── Error / empty ── */
+        .rg-empty {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+            font-size: 15px;
+            line-height: 1.6;
+        }
+        .rg-error {
+            color: var(--danger);
+            background: rgba(255,59,48,0.08);
+            border-radius: 12px;
+            padding: 14px 16px;
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+
+        @media (max-width: 500px) {
+            .rg-date-row { grid-template-columns: 1fr; }
+            .rg-stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="rg-header">
+        <div class="rg-title">📋 Report Generator</div>
+        <div class="rg-subtitle">
+            Generate a structured JSON report from your tracker data.<br>
+            Select a date range, preview the summary, then download.
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="rg-card rg-controls">
+        <div class="rg-card-title">Date Range</div>
+
+        <div class="rg-presets" id="rg-presets">
+            <button class="rg-preset-btn" onclick="RGPage.setPreset(7)">Last 7 days</button>
+            <button class="rg-preset-btn" onclick="RGPage.setPreset(30)">Last 30 days</button>
+            <button class="rg-preset-btn" onclick="RGPage.setPreset(90)">Last 90 days</button>
+            <button class="rg-preset-btn" onclick="RGPage.setPreset(0)">All Data</button>
+        </div>
+
+        <div class="rg-date-row">
+            <div class="rg-field">
+                <label class="rg-label" for="rg-start">Start Date</label>
+                <input type="date" id="rg-start">
+            </div>
+            <div class="rg-field">
+                <label class="rg-label" for="rg-end">End Date</label>
+                <input type="date" id="rg-end">
+            </div>
+        </div>
+
+        <button id="rg-generate-btn" class="rg-generate-btn" onclick="RGPage.generate()">
+            📊 Generate Report
+        </button>
+    </div>
+
+    <!-- Result area -->
+    <div id="rg-result"></div>
+
+    <script>
+    const RGPage = (() => {
+        let _lastReport = null;
+        let _allEntries = [];
+
+        function fmt(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+
+        function setPreset(days) {
+            // Highlight button
+            document.querySelectorAll('.rg-preset-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+
+            const today = new Date();
+            document.getElementById('rg-end').value = fmt(today);
+            if (days === 0) {
+                document.getElementById('rg-start').value = '';
+            } else {
+                const start = new Date(today);
+                start.setDate(start.getDate() - days + 1);
+                document.getElementById('rg-start').value = fmt(start);
+            }
+        }
+
+        function loadEntries() {
+            try {
+                const raw = localStorage.getItem('gt_report_entries');
+                if (!raw) return [];
+                return JSON.parse(raw);
+            } catch (e) { return []; }
+        }
+
+        function showLoading() {
+            document.getElementById('rg-result').innerHTML = `
+                <div class="rg-card">
+                    <div class="rg-loading">
+                        <div class="rg-spinner"></div>
+                        <div class="rg-loading-msg">Building report…</div>
+                    </div>
+                </div>`;
+            const btn = document.getElementById('rg-generate-btn');
+            if (btn) { btn.disabled = true; btn.textContent = 'Building…'; }
+        }
+
+        function resetBtn() {
+            const btn = document.getElementById('rg-generate-btn');
+            if (btn) { btn.disabled = false; btn.textContent = '📊 Generate Report'; }
+        }
+
+        function showError(msg) {
+            document.getElementById('rg-result').innerHTML =
+                `<div class="rg-card"><div class="rg-error">⚠️ ${msg}</div></div>`;
+        }
+
+        function generate() {
+            const startDate = document.getElementById('rg-start').value || null;
+            const endDate   = document.getElementById('rg-end').value   || null;
+
+            showLoading();
+
+            setTimeout(() => {
+                try {
+                    const entries = loadEntries();
+                    if (!entries.length) {
+                        showError('No data found. Open the main tracker first — it will load your entries.');
+                        resetBtn(); return;
+                    }
+
+                    // Filter by date
+                    const filtered = entries.filter(e => {
+                        const d = (e.date || (e.timestamp && e.timestamp.split('T')[0]));
+                        if (!d) return false;
+                        if (startDate && d < startDate) return false;
+                        if (endDate   && d > endDate)   return false;
+                        return true;
+                    });
+
+                    if (!filtered.length) {
+                        showError('No entries found in the selected date range. Try widening the range.');
+                        resetBtn(); return;
+                    }
+
+                    const report = ReportGenerator.generateReport(filtered, {});
+                    _lastReport = report;
+
+                    renderPreview(report, startDate, endDate, filtered.length);
+                } catch (err) {
+                    showError(`Failed to generate report: ${err && err.message}`);
+                } finally {
+                    resetBtn();
+                }
+            }, 40);
+        }
+
+        function renderPreview(report, startDate, endDate, entryCount) {
+            const s = report.summary;
+            const m = report.metadata;
+
+            const rangeText = startDate && endDate
+                ? `${startDate} → ${endDate}`
+                : startDate ? `From ${startDate}` : endDate ? `Until ${endDate}` : 'All time';
+
+            const stats = [
+                { val: s.activeDays,           lbl: 'Active Days' },
+                { val: entryCount,              lbl: 'Total Entries' },
+                { val: s.avgCaloriesPerDay,     lbl: 'Avg kcal/day' },
+                { val: s.avgProteinPerDay + 'g',lbl: 'Avg Protein' },
+                { val: s.avgCarbsPerDay + 'g',  lbl: 'Avg Carbs' },
+                { val: s.avgFatPerDay + 'g',    lbl: 'Avg Fat' },
+                { val: s.avgHealthScore !== null ? s.avgHealthScore + '/10' : '—', lbl: 'Avg Health Score' },
+            ];
+
+            const statsHtml = stats.map(s =>
+                `<div class="rg-stat-chip"><div class="rg-stat-val">${s.val}</div><div class="rg-stat-lbl">${s.lbl}</div></div>`
+            ).join('');
+
+            document.getElementById('rg-result').innerHTML = `
+                <div class="rg-card" style="border-top:3px solid var(--green)">
+                    <div class="rg-card-title">Report Summary</div>
+                    <div class="rg-range-info">
+                        <span>📅 Date range:</span>
+                        <span class="rg-range-badge">${rangeText}</span>
+                        <span>· Generated ${new Date().toLocaleTimeString()}</span>
+                    </div>
+                    <div class="rg-stats-grid">${statsHtml}</div>
+                </div>
+                <div class="rg-card" style="border-top:3px solid var(--primary)">
+                    <div class="rg-card-title">Download</div>
+                    <div class="rg-actions">
+                        <button class="rg-download-btn" onclick="RGPage.download()">⬇️ Download JSON Report</button>
+                        <button class="rg-download-btn outline" onclick="RGPage.copyJson()">📋 Copy to Clipboard</button>
+                    </div>
+                    <p style="font-size:12px;color:var(--text-secondary);margin-top:12px;line-height:1.5">
+                        The report includes metadata, daily summaries, all individual entries, and body weight log — structured for analysis in any tool.
+                    </p>
+                </div>`;
+        }
+
+        function download() {
+            if (!_lastReport) return;
+            const date = new Date().toISOString().split('T')[0];
+            ReportGenerator.downloadReport(_lastReport, `calorie-tracker-report-${date}.json`);
+        }
+
+        function copyJson() {
+            if (!_lastReport) return;
+            const json = JSON.stringify(_lastReport, null, 2);
+            navigator.clipboard.writeText(json).then(() => {
+                const btn = document.querySelector('.rg-download-btn.outline');
+                if (btn) { btn.textContent = '✅ Copied!'; setTimeout(() => btn.textContent = '📋 Copy to Clipboard', 2000); }
+            }).catch(() => alert('Copy failed — please use Download instead.'));
+        }
+
+        // Init
+        document.addEventListener('DOMContentLoaded', () => {
+            const today = new Date();
+            const start = new Date(today);
+            start.setDate(start.getDate() - 29);
+            document.getElementById('rg-end').value   = fmt(today);
+            document.getElementById('rg-start').value = fmt(start);
+            // Highlight 30-day preset button
+            const btns = document.querySelectorAll('.rg-preset-btn');
+            if (btns[1]) btns[1].classList.add('active');
+        });
+
+        return { setPreset, generate, download, copyJson };
+    })();
+    </script>
+</body>
+</html>

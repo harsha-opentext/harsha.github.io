@@ -51,16 +51,9 @@ schema:
       placeholder: "Optional"
       
     - name: "time"
-      type: "select"
+      type: "time"
       label: "Time"
       required: false
-      options:
-        - "Current Time"
-        - "Breakfast (9:00 AM)"
-        - "Lunch (1:00 PM)"
-        - "Dinner (7:00 PM)"
-        - "Snack (3:00 PM)"
-      default: "Current Time"
 
   # Define which field to sum for totals
   totalField: "calories"
