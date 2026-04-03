@@ -20,6 +20,8 @@ const DEFAULT_CONFIG = {
     showToasts: true,
     // Allow editing recorded weights for dates other than today
     allowEditOlderWeights: false,
+    // Auto-increment streak on first entry of the day
+    autoIncrementStreakOnAdd: true,
     logRetentionMinutes: 5
 };
 

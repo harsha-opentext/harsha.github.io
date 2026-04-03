@@ -5,6 +5,19 @@ let state = {
     retentionMinutes: 5, 
     schema: null,
     fileIndex: {},
+    // streak: persisted streak information (current + best)
+    streak: {
+        currentStreak: 0,
+        longestStreak: 0,
+        lastActiveDate: null,
+        computedAt: null,
+        activeDates: []
+    },
+    // Calendar view state for streaks (month offset and per-month cache)
+    streakCalendar: {
+        offsetMonths: 0,
+        cache: {}
+    },
     logLevel: 'info', // debug, info, warn, error
     dateRangeStart: null,
     dateRangeEnd: null,
@@ -99,7 +112,31 @@ function dbg(msg, type = 'info', raw = null) {
     } catch (e) { /* ignore */ }
 }
 
-// Full toast notification (non-blocking) — preserves original behavior
+// Convert stored "H:MM AM/PM" → "HH:MM" for <input type="time">
+function _timeTo24(t) {
+    if (!t) return '';
+    const m = t.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (!m) return '';
+    let h = parseInt(m[1], 10);
+    const ap = m[3].toUpperCase();
+    if (ap === 'PM' && h !== 12) h += 12;
+    if (ap === 'AM' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${m[2]}`;
+}
+
+// Convert "HH:MM" from <input type="time"> → stored "H:MM AM/PM"
+function _time24to12(hhmm) {
+    if (!hhmm) return '';
+    const parts = hhmm.split(':');
+    if (parts.length < 2) return '';
+    const h = parseInt(parts[0], 10);
+    const min = parts[1];
+    const ap = h < 12 ? 'AM' : 'PM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${min} ${ap}`;
+}
+
+
 function showFullNotification(message, type = 'info') {
     try {
         const n = document.createElement('div');
@@ -169,9 +206,9 @@ function toggleViewMode() {
 }
 
 function updateDateButton() {
-    const btn = document.getElementById('date-btn');
-    if (!btn) return;
-    btn.textContent = getTodayString();
+    const el = document.getElementById('date-btn');
+    if (!el) return;
+    el.textContent = getTodayString();
 }
 
 // Helper: canonical today string used for filenames (YYYY-MM-DD)
@@ -181,6 +218,18 @@ function getTodayString() {
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
+}
+
+// Converts "YYYY-MM-DD" → "3rd April 2026"
+function formatDateReadable(dateStr) {
+    if (!dateStr) return '—';
+    try {
+        const [year, month, day] = dateStr.split('-').map(Number);
+        const v = day % 100;
+        const suffix = (v >= 11 && v <= 13) ? 'th' : (['th','st','nd','rd'][day % 10] || 'th');
+        const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        return `${day}${suffix} ${months[month - 1]} ${year}`;
+    } catch(e) { return dateStr; }
 }
 
 function updateBudgetUI(todayTotal) {
@@ -401,6 +450,33 @@ async function saveBudgetToRepo() {
     } catch (err) {
         dbg('Save budget error: ' + err.message, 'error');
         alert('Error saving budget to repo. Check logs.');
+    }
+}
+
+async function loadBudgetFromRepo() {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) return false;
+    const url = `https://api.github.com/repos/${repo}/contents/budget.json`;
+    try {
+        const res = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+        if (!res.ok) return false;
+        const j = await res.json();
+        if (j && j.content) {
+            const decoded = decodeURIComponent(escape(atob(j.content)));
+            const cfg = JSON.parse(decoded);
+            if (cfg && typeof cfg.dailyBudget === 'number') {
+                setConfig('dailyBudget', cfg.dailyBudget);
+                const inp = document.getElementById('cfg-daily-budget');
+                if (inp) inp.value = cfg.dailyBudget;
+                dbg(`Loaded budget from repo: ${cfg.dailyBudget}`, 'info');
+                return true;
+            }
+        }
+        return false;
+    } catch (e) {
+        dbg('loadBudgetFromRepo error: ' + (e && e.message), 'error');
+        return false;
     }
 }
 
@@ -812,6 +888,25 @@ function buildEntryCard(entry, globalIndex, opts = {}) {
         footer.appendChild(del);
     }
 
+    // "Add to Today" — history mode only, outside select mode (always visible regardless of range view)
+    if (mode === 'history' && !state.historySelectMode) {
+        const addBtn = document.createElement('button');
+        addBtn.style.cssText = 'background: #34c759; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; min-height:36px;';
+        addBtn.textContent = 'Add to Today';
+        addBtn.setAttribute('onclick', `addEntryToToday(${globalIndex})`);
+        footer.appendChild(addBtn);
+    }
+
+    // "+1" quick-add another serving — tracker mode only, outside select mode
+    if (mode === 'tracker' && !state.selectMode) {
+        const plusBtn = document.createElement('button');
+        plusBtn.style.cssText = 'background: #ff9500; color: white; border: none; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; min-height:36px;';
+        plusBtn.textContent = '+1';
+        plusBtn.title = 'Add another serving of this meal';
+        plusBtn.setAttribute('onclick', `repeatEntryToday(${globalIndex})`);
+        footer.appendChild(plusBtn);
+    }
+
     if (footer.children.length > 0) d.appendChild(footer);
 
     return d;
@@ -1015,6 +1110,22 @@ function showPage(p) {
         // Sync theme selector with current preference
         const themeSel = document.getElementById('theme-mode');
         if (themeSel) themeSel.value = localStorage.getItem('gt_theme') || 'auto';
+        // Sync auto-increment streak toggle
+        try {
+            const autoChk = document.getElementById('cfg-auto-increment-streak');
+            if (autoChk) {
+                autoChk.checked = !!getConfig('autoIncrementStreakOnAdd');
+                autoChk.onchange = () => { try { setConfig('autoIncrementStreakOnAdd', !!autoChk.checked); dbg('autoIncrementStreakOnAdd set to ' + !!autoChk.checked, 'info'); } catch (e) { dbg('cfg auto-increment handler error: ' + (e && e.message), 'warn'); } };
+            }
+        } catch (e) { /* ignore */ }
+    }
+    else if (p === 'streaks') {
+        // Ensure the streaks page shows the latest persisted/computed values
+        try {
+            updateStreakUI();
+            // Show current month view for streaks (lazy-load month data)
+            try { showStreakMonth(state.streakCalendar.offsetMonths || 0); } catch (e) { /* ignore */ }
+        } catch (e) { dbg('showPage(streaks) updateStreakUI failed', 'warn', e); }
     }
     // Ensure the newly shown page renders its latest state immediately
     try { render(); } catch (e) { dbg(`showPage render error: ${e && e.message ? e.message : String(e)}`, 'error'); }
@@ -1123,6 +1234,20 @@ function renderFormFields() {
         // Handle macro fields separately
         if (macroFields.includes(field.name)) return;
         
+        // Force time field to always use native picker regardless of schema type
+        if (field.name === 'time') {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'form-field';
+            const inp = document.createElement('input');
+            inp.type = 'time';
+            inp.id = 'field-time';
+            inp.placeholder = 'Meal time';
+            inp.className = 'form-input';
+            wrapper.appendChild(inp);
+            container.appendChild(wrapper);
+            return;
+        }
+        
         const wrapper = document.createElement('div');
         wrapper.className = 'form-field';
         wrapper.style.gridColumn = field.type === 'select' || field.type === 'date' ? '1' : 'auto';
@@ -1178,25 +1303,7 @@ function renderFormFields() {
         
         if (field.required) input.required = true;
         
-        // If this is the time field, add a time-picker helper button
-        if (field.name === 'time') {
-            const timeWrap = document.createElement('div');
-            timeWrap.style.display = 'flex';
-            timeWrap.style.gap = '8px';
-            timeWrap.appendChild(input);
-
-            const pickerBtn = document.createElement('button');
-            pickerBtn.type = 'button';
-            pickerBtn.className = 'btn-secondary';
-            pickerBtn.style.padding = '8px 10px';
-            pickerBtn.textContent = '⏱️';
-            pickerBtn.onclick = () => openTimePicker(input.id);
-            timeWrap.appendChild(pickerBtn);
-
-            wrapper.appendChild(timeWrap);
-        } else {
-            wrapper.appendChild(input);
-        }
+        wrapper.appendChild(input);
         container.appendChild(wrapper);
     });
     
@@ -1237,24 +1344,7 @@ function renderFormFields() {
         input.placeholder = field.label;
         input.min = field.min || 0;
         
-        // If this is the `time` field, add a small picker button next to the input
-        if (field.name === 'time') {
-            const timeWrap = document.createElement('div');
-            timeWrap.style.cssText = 'display:flex; gap:8px; align-items:center;';
-            timeWrap.appendChild(input);
-
-            const tpBtn = document.createElement('button');
-            tpBtn.type = 'button';
-            tpBtn.className = 'btn-secondary';
-            tpBtn.style.cssText = 'padding:8px 10px;';
-            tpBtn.textContent = '⏰';
-            tpBtn.onclick = () => openTimePicker(input.id);
-            timeWrap.appendChild(tpBtn);
-
-            wrapper.appendChild(timeWrap);
-        } else {
-            wrapper.appendChild(input);
-        }
+        wrapper.appendChild(input);
         macroSection.appendChild(wrapper);
     });
 
@@ -1332,10 +1422,13 @@ function getFormData() {
                     return;
                 }
             }
-            // Handle "Current Time" option
-            if (field.name === 'time' && value === 'Current Time') {
-                const now = new Date();
-                value = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            // Handle native time input (HH:MM → "H:MM AM/PM" stored format)
+            if (field.name === 'time') {
+                if (!value) {
+                    value = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+                } else {
+                    value = _time24to12(value) || value;
+                }
             }
             // Skip empty text fields
             if (!value || value === '') {
@@ -1372,6 +1465,89 @@ function toggleTokenVisibility() {
     const isHidden = input.type === 'password';
     input.type = isHidden ? 'text' : 'password';
     if (icon) icon.textContent = isHidden ? '🙈' : '👁️';
+}
+
+// ── Settings fuzzy search ────────────────────────────────────────────────────
+function settingsSearch(query) {
+    const clearBtn = document.getElementById('settings-search-clear');
+    const resultsEl = document.getElementById('settings-search-results');
+    const allCards = document.querySelectorAll('#page-settings [data-settings-tags]');
+
+    if (clearBtn) clearBtn.style.display = query ? 'flex' : 'none';
+
+    if (!query || query.trim().length < 1) {
+        if (resultsEl) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; }
+        allCards.forEach(c => { c.style.display = ''; });
+        const quickRow = document.querySelector('#page-settings .sc-quick-row');
+        if (quickRow) quickRow.style.display = '';
+        return;
+    }
+
+    const q = query.trim().toLowerCase();
+
+    // Fuzzy score: count matching characters in sequence (subsequence), also straight substring bonus
+    function fuzzyScore(text, q) {
+        text = text.toLowerCase();
+        if (text.includes(q)) return 100 + (1 / text.length); // exact substring wins
+        let tIdx = 0, qIdx = 0, score = 0;
+        while (tIdx < text.length && qIdx < q.length) {
+            if (text[tIdx] === q[qIdx]) { score++; qIdx++; }
+            tIdx++;
+        }
+        return qIdx === q.length ? score : 0;
+    }
+
+    const scored = [];
+    allCards.forEach(card => {
+        const tags = (card.getAttribute('data-settings-tags') || '') + ' ' + (card.querySelector('.sc-title')?.textContent || '');
+        const score = Math.max(...tags.split(' ').map(t => fuzzyScore(t, q)));
+        const title = (card.querySelector('.sc-title') || card.querySelector('.sc-quick-label'))?.textContent || 'Setting';
+        if (score > 0) scored.push({ card, score, title });
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    const top = scored.slice(0, 3);
+
+    // Hide all cards while searching, show only results summary
+    allCards.forEach(c => { c.style.display = 'none'; });
+    const quickRow = document.querySelector('#page-settings .sc-quick-row');
+    if (quickRow) quickRow.style.display = 'none';
+
+    if (!resultsEl) return;
+    if (top.length === 0) {
+        resultsEl.innerHTML = '<div class="settings-search-empty">No matching settings found.</div>';
+        resultsEl.style.display = 'block';
+        return;
+    }
+
+    resultsEl.innerHTML = '';
+    resultsEl.style.display = 'block';
+
+    top.forEach(({ card, title }) => {
+        const btn = document.createElement('button');
+        btn.className = 'settings-search-hit';
+        const icon = (card.querySelector('.sc-icon') || card.querySelector('.sc-quick-icon'))?.textContent || '⚙️';
+        btn.innerHTML = `<span class="ssh-icon">${icon}</span><span class="ssh-label">${title}</span><span class="ssh-arr">›</span>`;
+        btn.onclick = () => {
+            settingsSearchClear();
+            card.style.display = '';
+            // Show quick-row if needed
+            if (card.closest('.sc-quick-row')) {
+                const qr = document.querySelector('#page-settings .sc-quick-row');
+                if (qr) qr.style.display = '';
+            }
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            card.classList.add('sc-highlight');
+            setTimeout(() => card.classList.remove('sc-highlight'), 1600);
+        };
+        resultsEl.appendChild(btn);
+    });
+}
+
+function settingsSearchClear() {
+    const input = document.getElementById('settings-search');
+    if (input) { input.value = ''; }
+    settingsSearch('');
 }
 
 // --- CORE LOGIC ---
@@ -1741,7 +1917,7 @@ async function pushEntryForDate(dateStr, entry) {
         } catch (e) {
             dbg(`No existing ${filePath} found, creating new file`, 'debug');
         }
-
+        const preActiveCount = existing.filter(en => !(en && en._meta === 'dailyWeight')).length;
         existing.push(entry);
         const jsonContent = JSON.stringify(existing, null, 2);
         dbg(`pushEntryForDate: prepared JSON content length=${jsonContent.length}`, 'debug');
@@ -1761,11 +1937,17 @@ async function pushEntryForDate(dateStr, entry) {
         dbg(`pushEntryForDate PUT status: ${putRes.status}`, 'debug');
         const putBody = await putRes.text().catch(() => '');
         dbg(`pushEntryForDate PUT response preview: ${putBody.slice(0,200)}`, 'debug');
-        if (putRes.ok) {
+            if (putRes.ok) {
             const resj = JSON.parse(putBody || '{}');
             state.fileIndex[dateStr] = resj.content?.sha;
             dbg(`Pushed entry to ${filePath} (SHA: ${resj.content?.sha?.substring?.(0,8) || 'unknown'})`, 'info');
             try { showNotification(`Wrote entry to ${filePath}`, 'write'); } catch (e) {}
+            // If this was the first active entry for today, attempt to increment persisted streak
+            try {
+                if (dateStr === getTodayString() && preActiveCount === 0 && !(entry && entry._meta === 'dailyWeight')) {
+                    incrementStreakOnAdd(dateStr).catch(err => dbg('incrementStreakOnAdd error: ' + (err && err.message), 'warn', err));
+                }
+            } catch (e) { /* ignore */ }
             return true;
         } else {
             let err = {};
@@ -1859,6 +2041,14 @@ async function pushEntriesByDate(entries, options = { mode: 'append' }) {
                 state.fileIndex[dateStr] = resj.content?.sha;
                 dbg(`Imported ${groups[dateStr].length} into ${filePath} (SHA: ${resj.content?.sha?.substring?.(0,8) || 'unknown'})`, 'info');
                 try { showNotification(`Wrote ${groups[dateStr].length} entries to ${filePath}`, 'write'); } catch (e) {}
+                // If we created the first active entries for today, trigger increment
+                try {
+                    const preActiveCount = existing.filter(en => !(en && en._meta === 'dailyWeight')).length;
+                    const hasActiveNow = Array.isArray(finalArray) && finalArray.some(en => !(en && en._meta === 'dailyWeight'));
+                    if (dateStr === getTodayString() && preActiveCount === 0 && hasActiveNow) {
+                        incrementStreakOnAdd(dateStr).catch(err => dbg('incrementStreakOnAdd error: ' + (err && err.message), 'warn', err));
+                    }
+                } catch (e) { /* ignore */ }
             } else {
                 let err = {};
                 try { err = JSON.parse(putText); } catch (e) { err = { message: putText }; }
@@ -1868,6 +2058,7 @@ async function pushEntriesByDate(entries, options = { mode: 'append' }) {
             dbg(`pushEntriesByDate error (${dateStr}): ${err.message}`, 'error');
         }
     }
+    // Streak recompute intentionally disabled here; compute only via Settings actions.
 }
 
 // Write a single date file (allows writing empty arrays to clear a date)
@@ -1892,13 +2083,18 @@ async function pushDateFile(dateStr, finalArray) {
     dbg(`Replacing ${filePath} with ${finalArray.length} entries`, 'info');
 
     try {
-        // Try to fetch existing file to get SHA
+        // Try to fetch existing file to get SHA and existing content
         let fileSha = null;
+        let existing = [];
+        let preActiveCount = 0;
         try {
             const getRes = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
             if (getRes.ok) {
                 const j = await getRes.json();
                 fileSha = j.sha;
+                try { existing = JSON.parse(atob(j.content || '')); } catch (e) { existing = []; }
+                if (!Array.isArray(existing)) existing = [];
+                preActiveCount = existing.filter(en => !(en && en._meta === 'dailyWeight')).length;
             }
         } catch (e) { /* ignore */ }
 
@@ -1915,6 +2111,13 @@ async function pushDateFile(dateStr, finalArray) {
             state.fileIndex[dateStr] = resj.content?.sha;
             dbg(`Wrote ${filePath} (SHA: ${resj.content?.sha?.substring?.(0,8) || 'unknown'})`, 'info');
             try { showNotification(`Saved ${filePath}`, 'write'); } catch (e) {}
+            // If the file was previously empty of active entries and now contains at least one, increment streak
+            try {
+                const hasActiveNow = Array.isArray(finalArray) && finalArray.some(en => !(en && en._meta === 'dailyWeight'));
+                if (dateStr === getTodayString() && preActiveCount === 0 && hasActiveNow) {
+                    incrementStreakOnAdd(dateStr).catch(err => dbg('incrementStreakOnAdd error: ' + (err && err.message), 'warn', err));
+                }
+            } catch (e) { /* ignore */ }
             return true;
         } else {
             let err = {};
@@ -2361,8 +2564,10 @@ async function addEntry() {
     try {
         const dateStr = getEntryDate(data) || getTodayString();
         try {
-            const ok = await pushEntryForDate(dateStr, data);
-            if (ok) state.hasUnsavedChanges = false;
+                const ok = await pushEntryForDate(dateStr, data);
+            if (ok) {
+                state.hasUnsavedChanges = false;
+            }
         } catch (err) {
             dbg(`Auto-save per-date push failed: ${err.message}`, 'error');
         }
@@ -2990,24 +3195,42 @@ try {
             dbg(`renderWeightGraph: start ${startDate} -> ${endDate}`, 'info');
             const canvas = document.getElementById('chart-weight-trend');
             if (!canvas) return;
-            // Build inclusive date array (ascending)
+
+            // Build inclusive date array
             const dates = [];
             let cur = new Date(startDate);
             const endD = new Date(endDate);
-            while (cur <= endD) {
-                dates.push(formatDateLocal(cur));
-                cur.setDate(cur.getDate() + 1);
-            }
+            while (cur <= endD) { dates.push(formatDateLocal(cur)); cur.setDate(cur.getDate() + 1); }
 
-            // Fetch weights (use cache first)
-            const weightPromises = dates.map(d => getDailyWeightForDate(d));
-            const weights = await Promise.all(weightPromises);
+            const weights = await Promise.all(dates.map(d => getDailyWeightForDate(d)));
 
-            // Destroy existing chart if present
             if (typeof charts !== 'undefined' && charts && charts.weight) {
-                try { charts.weight.destroy(); } catch (e) { /* ignore */ }
+                try { charts.weight.destroy(); } catch (e) {}
                 delete charts.weight;
             }
+
+            // Stats
+            const nonNull = weights.filter(w => w !== null && w !== undefined);
+            const startW = nonNull.length > 0 ? nonNull[0] : null;
+            const endW   = nonNull.length > 0 ? nonNull[nonNull.length - 1] : null;
+            const avg    = nonNull.length > 0 ? nonNull.reduce((s, v) => s + v, 0) / nonNull.length : null;
+            const delta  = (startW !== null && endW !== null) ? (endW - startW) : null;
+
+            const fmtW = v => v !== null && v !== undefined ? `${Number(v).toFixed(1)} kg` : '—';
+            const fmtD = v => v === null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1) + ' kg';
+            const deltaColor = delta === null ? 'var(--text)' : delta > 0 ? '#ff3b30' : delta < 0 ? '#34c759' : 'var(--text)';
+
+            const startEl = document.getElementById('weight-modal-start');
+            const endEl   = document.getElementById('weight-modal-end');
+            const deltaEl = document.getElementById('weight-modal-delta');
+            const avgEl   = document.getElementById('weight-modal-avg');
+            if (startEl) startEl.textContent = fmtW(startW);
+            if (endEl)   endEl.textContent   = fmtW(endW);
+            if (deltaEl) { deltaEl.textContent = fmtD(delta); deltaEl.style.color = deltaColor; }
+            if (avgEl)   avgEl.textContent   = fmtW(avg);
+
+            const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e';
+            const gridColor = 'rgba(128,128,128,0.08)';
 
             const ctx = canvas.getContext('2d');
             charts = charts || {};
@@ -3023,7 +3246,9 @@ try {
                         fill: true,
                         tension: 0.4,
                         spanGaps: false,
-                        pointRadius: 4
+                        pointRadius: 4,
+                        pointHoverRadius: 7,
+                        pointBackgroundColor: '#007aff',
                     }]
                 },
                 options: {
@@ -3031,23 +3256,16 @@ try {
                     maintainAspectRatio: false,
                     interaction: { mode: 'index', intersect: false },
                     scales: {
-                        x: { ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e' }, grid: { color: 'rgba(128,128,128,0.06)' } },
-                        y: { beginAtZero: false, ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e' }, title: { display: true, text: 'kg' }, grid: { color: 'rgba(128,128,128,0.06)' } }
+                        x: { ticks: { color: textColor, maxTicksLimit: 10 }, grid: { color: gridColor } },
+                        y: { beginAtZero: false, ticks: { color: textColor }, title: { display: true, text: 'Weight (kg)', color: textColor }, grid: { color: gridColor } }
                     },
-                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y ?? ''} kg` } } }
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y ?? ''} kg` } }
+                    }
                 }
             });
-
-            // Show start/end weights (print values for the exact start/end dates)
-            const startDisplay = document.getElementById('weight-modal-start');
-            const endDisplay = document.getElementById('weight-modal-end');
-            const startW = weights.length > 0 ? weights[0] : null;
-            const endW = weights.length > 0 ? weights[weights.length - 1] : null;
-            if (startDisplay) startDisplay.textContent = (startW !== null && startW !== undefined) ? `${Number(startW).toFixed(1)} kg` : '—';
-            if (endDisplay) endDisplay.textContent = (endW !== null && endW !== undefined) ? `${Number(endW).toFixed(1)} kg` : '—';
-
         } catch (e) { dbg(`renderWeightGraph error: ${e && e.message}`, 'error'); }
-        finally { dbg(`renderWeightGraph: complete ${startDate} -> ${endDate}`, 'info'); }
     }
 
 // --- HISTORY PAGE (refactored into helpers) ---
@@ -3706,6 +3924,906 @@ function formatDateLocal(d) {
     }
 }
 
+// ----------------------
+// Streak helpers
+// ----------------------
+// Queue and debounce helpers for writing streak.json to repo
+let __streakSaveQueue = [];
+let __streakSaveInProgress = false;
+let __streakSaveDebounceTimer = null;
+const __STREAK_SAVE_DEBOUNCE_MS = 250;
+
+function enqueueStreakSave() {
+    return new Promise((resolve, reject) => {
+        __streakSaveQueue.push({ resolve, reject });
+        if (__streakSaveDebounceTimer) clearTimeout(__streakSaveDebounceTimer);
+        __streakSaveDebounceTimer = setTimeout(() => { __processStreakSaveQueue(); }, __STREAK_SAVE_DEBOUNCE_MS);
+    });
+}
+
+async function __processStreakSaveQueue() {
+    if (__streakSaveInProgress) return;
+    if (__streakSaveDebounceTimer) { clearTimeout(__streakSaveDebounceTimer); __streakSaveDebounceTimer = null; }
+    if (__streakSaveQueue.length === 0) return;
+    __streakSaveInProgress = true;
+    try {
+        // Persist a compact streak object (do NOT include activeDates array)
+        const toPersist = {
+            version: state.streak?.version || 1,
+            currentStreak: state.streak?.currentStreak || 0,
+            longestStreak: state.streak?.longestStreak || 0,
+            lastActiveDate: state.streak?.lastActiveDate || null,
+            updatedAt: state.streak?.updatedAt || new Date().toISOString()
+        };
+        const ok = await pushStreakFile(toPersist);
+        while (__streakSaveQueue.length) {
+            const { resolve } = __streakSaveQueue.shift();
+            try { resolve(ok); } catch (e) { /* ignore */ }
+        }
+    } catch (err) {
+        while (__streakSaveQueue.length) {
+            const { reject } = __streakSaveQueue.shift();
+            try { reject(err); } catch (e) { /* ignore */ }
+        }
+    } finally {
+        __streakSaveInProgress = false;
+    }
+}
+
+// Compute streak information from state.entries
+function computeStreakFromEntries() {
+    const activeDatesSet = new Set();
+    try {
+        (Array.isArray(state.entries) ? state.entries : []).forEach(e => {
+            if (!e) return;
+            if (e._meta === 'dailyWeight') return;
+            const d = getEntryDate(e);
+            if (d) activeDatesSet.add(d);
+        });
+    } catch (e) { dbg('computeStreakFromEntries: build activeDates error: ' + (e && e.message), 'error', e); }
+
+    const activeDates = Array.from(activeDatesSet).sort(); // ascending
+    if (activeDates.length === 0) {
+        return { currentStreak: 0, longestStreak: state.streak?.longestStreak || 0, lastActiveDate: null, computedAt: new Date().toISOString(), activeDates: [] };
+    }
+
+    const lastActiveDate = activeDates[activeDates.length - 1];
+
+    // Compute current streak as consecutive days up to TODAY only.
+    let currentStreak = 0;
+    try {
+        let cur = new Date(getTodayString());
+        while (true) {
+            const s = formatDateLocal(cur);
+            if (activeDatesSet.has(s)) {
+                currentStreak++;
+                cur.setDate(cur.getDate() - 1);
+            } else break;
+        }
+    } catch (e) { dbg('computeStreakFromEntries: consecutive run (today-based) error: ' + (e && e.message), 'error', e); }
+
+    // Compute longest streak across history
+    let longest = 0;
+    let run = 0;
+    for (let i = 0; i < activeDates.length; i++) {
+        if (i === 0) { run = 1; } else {
+            const prev = new Date(activeDates[i - 1]);
+            const cur = new Date(activeDates[i]);
+            const diff = Math.round((cur - prev) / (24 * 3600 * 1000));
+            if (diff === 1) run++; else { longest = Math.max(longest, run); run = 1; }
+        }
+    }
+    longest = Math.max(longest, run, state.streak?.longestStreak || 0);
+
+    return { currentStreak, longestStreak: longest, lastActiveDate, computedAt: new Date().toISOString(), activeDates };
+}
+
+// Compute streak, cache locally and enqueue remote save when possible
+async function computeAndEnqueueStreakSave() {
+    try {
+        const newObj = computeStreakFromEntries();
+        state.streak = Object.assign({}, state.streak || {}, newObj);
+        try { localStorage.setItem('streak_cache', JSON.stringify(state.streak)); } catch (e) {}
+        // Update UI immediately when recomputed
+        try { updateStreakUI(); } catch (e) { dbg('updateStreakUI failed after compute', 'warn', e); }
+        const token = localStorage.getItem('gt_token');
+        const repo = localStorage.getItem('gt_repo');
+        if (token && repo) {
+            enqueueStreakSave().then(ok => { if (ok) dbg('Streak persisted to repo', 'info'); }).catch(err => { dbg('Streak save failed: ' + (err && err.message), 'error', err); });
+        } else {
+            dbg('Streak cached locally (no GitHub credentials)', 'info');
+        }
+    } catch (e) { dbg('computeAndEnqueueStreakSave error: ' + (e && e.message), 'error', e); }
+}
+
+// Push streak file (streak.json) to repo using SHA-aware PUT with retry-on-409
+async function pushStreakFile(streakObj) {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) { dbg('pushStreakFile: missing credentials', 'warn'); return false; }
+    const dataFolder = getConfig('dataFolder') || 'data';
+    const filePath = `${dataFolder}/streak.json`;
+    const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+
+    // Try to fetch existing sha
+    let fileSha = null;
+    try {
+        const getRes = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+        if (getRes.ok) {
+            const j = await getRes.json(); fileSha = j.sha;
+        }
+    } catch (e) { /* ignore */ }
+
+    const body = { message: `Update streak: ${new Date().toISOString()}`, content: btoa(unescape(encodeURIComponent(JSON.stringify(streakObj, null, 2)))) };
+    if (fileSha) body.sha = fileSha;
+
+    try {
+        let putRes = await fetch(url, { method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        if (putRes.ok) {
+            const resj = await putRes.json(); state.fileIndex = state.fileIndex || {}; state.fileIndex['streak'] = resj.content?.sha; try { showNotification('Streak persisted to repo', 'write'); } catch (e) {}
+            return true;
+        }
+        if (putRes.status === 409) {
+            dbg('pushStreakFile: conflict (409), retrying with refreshed sha', 'warn');
+            try {
+                const refresh = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+                if (refresh.ok) {
+                    const rj = await refresh.json(); body.sha = rj.sha;
+                    putRes = await fetch(url, { method: 'PUT', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                    if (putRes.ok) {
+                        const resj = await putRes.json(); state.fileIndex = state.fileIndex || {}; state.fileIndex['streak'] = resj.content?.sha; try { showNotification('Streak persisted to repo (after retry)', 'write'); } catch (e) {}
+                        return true;
+                    }
+                }
+            } catch (e) { dbg('pushStreakFile retry error: ' + (e && e.message), 'error', e); }
+        }
+        const txt = await putRes.text().catch(() => ''); dbg('pushStreakFile failed: ' + (txt || putRes.statusText), 'error', txt); return false;
+    } catch (e) { dbg('pushStreakFile error: ' + (e && e.message), 'error', e); return false; }
+}
+
+// Incremental helper: when today's first active entry is created, update streak.json compactly.
+async function incrementStreakOnAdd(dateStr) {
+    try {
+        // Respect settings toggle
+        if (!getConfig('autoIncrementStreakOnAdd')) {
+            dbg('incrementStreakOnAdd: auto-increment disabled by config', 'debug');
+            return false;
+        }
+        const today = getTodayString();
+        if (dateStr !== today) return false;
+
+        // Check yesterday's activity (presence of any non-weight entry)
+        function prevDate(ds) {
+            const d = new Date(ds);
+            d.setDate(d.getDate() - 1);
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        }
+        const yesterday = prevDate(dateStr);
+        let yesterdayHasActive = false;
+        try {
+            const y = await fetchDateFromGit(yesterday);
+            if (y && y.status === 200 && Array.isArray(y.entries)) {
+                yesterdayHasActive = y.entries.some(en => !(en && en._meta === 'dailyWeight'));
+            }
+        } catch (e) { dbg('incrementStreakOnAdd: failed to fetch yesterday: ' + (e && e.message), 'warn', e); }
+
+        // Load existing persisted streak (prefer remote, fallback to cache)
+        let remote = { currentStreak: 0, longestStreak: 0, lastActiveDate: null };
+        const token = localStorage.getItem('gt_token');
+        const repo = localStorage.getItem('gt_repo');
+        const dataFolder = getConfig('dataFolder') || 'data';
+        const filePath = `${dataFolder}/streak.json`;
+        const url = token && repo ? `https://api.github.com/repos/${repo}/contents/${filePath}` : null;
+
+        if (token && repo && url) {
+            try {
+                const res = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+                if (res.ok) {
+                    const j = await res.json();
+                    try { remote = JSON.parse(decodeURIComponent(escape(atob(j.content||'')))); } catch (e) { remote = remote; }
+                } else {
+                    // treat missing as fresh
+                    remote = remote;
+                }
+            } catch (e) { dbg('incrementStreakOnAdd: failed to fetch streak.json: ' + (e && e.message), 'warn'); }
+        } else {
+            try { const raw = localStorage.getItem('streak_cache'); if (raw) remote = JSON.parse(raw); } catch (e) { /* ignore */ }
+        }
+
+        // Prevent double-counting same day
+        if (remote && remote.lastActiveDate === dateStr) {
+            dbg('incrementStreakOnAdd: already counted today', 'debug');
+            return false;
+        }
+
+        const prevCount = parseInt(remote.currentStreak || 0, 10) || 0;
+        const newCurrent = yesterdayHasActive ? (prevCount + 1) : 1;
+        const newLongest = Math.max(parseInt(remote.longestStreak || 0, 10) || 0, newCurrent);
+        const newObj = { version: 1, currentStreak: newCurrent, longestStreak: newLongest, lastActiveDate: dateStr, updatedAt: new Date().toISOString() };
+
+        // Try to persist via pushStreakFile (handles SHA and retry)
+        try {
+            const ok = await pushStreakFile(newObj);
+            state.streak = Object.assign({}, state.streak || {}, newObj);
+            try { localStorage.setItem('streak_cache', JSON.stringify(state.streak)); } catch (e) {}
+            try { updateStreakUI(); } catch (e) {}
+            showNotification(ok ? `Current streak ${newCurrent}d` : `Current streak ${newCurrent}d (cached)`, ok ? 'write' : 'warn');
+            return ok;
+        } catch (e) {
+            dbg('incrementStreakOnAdd: pushStreakFile failed: ' + (e && e.message), 'warn', e);
+            // Fallback: persist locally
+            state.streak = Object.assign({}, state.streak || {}, newObj);
+            try { localStorage.setItem('streak_cache', JSON.stringify(state.streak)); } catch (e) {}
+            try { updateStreakUI(); } catch (e) {}
+            showNotification(`Current streak ${newCurrent}d (cached locally)`, 'warn');
+            return false;
+        }
+    } catch (e) {
+        dbg('incrementStreakOnAdd error: ' + (e && e.message), 'error', e);
+        return false;
+    }
+}
+
+// Load streak from repo (if creds present) or from local cache
+async function loadStreakFromRepoOrCache() {
+    state.streak = state.streak || { currentStreak: 0, longestStreak: 0, lastActiveDate: null, computedAt: null, activeDates: [] };
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    const dataFolder = getConfig('dataFolder') || 'data';
+    const filePath = `${dataFolder}/streak.json`;
+    const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+    if (token && repo) {
+        try {
+            const res = await fetch(url, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+            if (res.ok) {
+                const j = await res.json(); if (j && j.content) {
+                    const decoded = decodeURIComponent(escape(atob(j.content))); try { const obj = JSON.parse(decoded); state.streak = Object.assign({}, state.streak || {}, obj); state.fileIndex = state.fileIndex || {}; state.fileIndex['streak'] = j.sha; dbg('Loaded streak from repo', 'info'); return true; } catch (e) { dbg('Failed to parse streak.json from repo: ' + (e && e.message), 'warn'); }
+                }
+            } else { dbg('streak.json not found in repo (or inaccessible)', 'debug'); }
+        } catch (e) { dbg('loadStreakFromRepo error: ' + (e && e.message), 'warn', e); }
+    }
+    // fallback to local cache
+    try {
+        const raw = localStorage.getItem('streak_cache'); if (raw) { const obj = JSON.parse(raw); if (obj) { state.streak = Object.assign({}, state.streak || {}, obj); dbg('Loaded streak from localStorage cache', 'info'); return true; } }
+    } catch (e) { dbg('Local streak cache parse error: ' + (e && e.message), 'warn'); }
+    return false;
+}
+
+// ----------------------
+// Settings-driven streak compute helpers (sequential fetch + progress UI)
+// These functions perform single-file, sequential network fetches and update
+// a small progress UI in Settings. All streak calculations must be triggered
+// explicitly via these actions — no automatic recompute occurs elsewhere.
+// ----------------------
+
+function _streakProgressShow() {
+    try {
+        const c = document.getElementById('streak-progress-container');
+        const f = document.getElementById('streak-progress-fill');
+        const t = document.getElementById('streak-progress-text');
+        if (c) c.style.display = 'block';
+        if (f) f.style.width = '0%';
+        if (t) t.textContent = 'Starting...';
+    } catch (e) { dbg('streakProgressShow error: ' + (e && e.message), 'warn'); }
+}
+
+function _streakProgressUpdate(done, total, currentDate) {
+    try {
+        const f = document.getElementById('streak-progress-fill');
+        const t = document.getElementById('streak-progress-text');
+        if (f && typeof done === 'number' && typeof total === 'number' && total > 0) {
+            f.style.width = Math.round((done / total) * 100) + '%';
+        }
+        if (t) t.textContent = `${done}/${total}${currentDate ? ' — ' + currentDate : ''}`;
+    } catch (e) { dbg('streakProgressUpdate error: ' + (e && e.message), 'warn'); }
+}
+
+function _streakProgressHide() {
+    try {
+        const c = document.getElementById('streak-progress-container');
+        const f = document.getElementById('streak-progress-fill');
+        const t = document.getElementById('streak-progress-text');
+        if (f) f.style.width = '0%';
+        if (t) t.textContent = '';
+        if (c) setTimeout(() => { try { c.style.display = 'none'; } catch (e) {} }, 600);
+    } catch (e) { dbg('streakProgressHide error: ' + (e && e.message), 'warn'); }
+}
+
+async function computeLongestStreakFullScanUI() {
+    try {
+        await computeLongestStreakFullScan();
+    } catch (e) {
+        dbg('computeLongestStreakFullScanUI error: ' + (e && e.message), 'error', e);
+        showNotification('Failed to compute longest streak', 'error');
+    }
+}
+
+async function computeLongestStreakFullScan() {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) {
+        showNotification('Missing GitHub credentials; configure in Settings first', 'error');
+        showPage('settings');
+        return false;
+    }
+    const dataFolder = getConfig('dataFolder') || 'data';
+    const listUrl = `https://api.github.com/repos/${repo}/contents/${dataFolder}`;
+    _streakProgressShow();
+    const computeBtn = document.getElementById('compute-longest-btn');
+    const currentBtn = document.getElementById('compute-current-btn');
+    if (computeBtn) computeBtn.disabled = true;
+    if (currentBtn) currentBtn.disabled = true;
+
+    try {
+        const res = await fetch(listUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+        if (!res.ok) {
+            const txt = await res.text().catch(() => '');
+            dbg('computeLongestStreakFullScan: failed to list folder: ' + (txt || res.statusText), 'error');
+            showNotification('Failed to list data folder', 'error');
+            _streakProgressHide();
+            if (computeBtn) computeBtn.disabled = false; if (currentBtn) currentBtn.disabled = false;
+            return false;
+        }
+
+        const items = await res.json();
+        const dateItems = (items || []).filter(it => it && it.type === 'file' && /^\d{4}-\d{2}-\d{2}\.json$/.test(it.name)).sort((a, b) => a.name.localeCompare(b.name));
+
+        // Prefer scanning the most-recent N days (config `fetchDays`) as a stable window.
+        // If the folder listing is unexpectedly small, fall back to generating the last
+        // `fetchDays` dates and attempt to fetch each date explicitly. This makes the
+        // longest-streak full scan cover the same recent range the current-streak
+        // compute traverses and avoids surprises from partial/limited directory listings.
+        const limitDays = parseInt(getConfig('fetchDays') || 90, 10) || 90;
+        let datesToCheck = [];
+        if (dateItems && dateItems.length >= limitDays) {
+            // We have at least `limitDays` files listed; take the newest `limitDays`.
+            const newest = dateItems.slice(Math.max(0, dateItems.length - limitDays));
+            datesToCheck = newest.map(it => it.name.replace('.json', '')).sort();
+        } else {
+            // Fallback: generate the last `limitDays` calendar dates (oldest->newest)
+            const today = getTodayString();
+            for (let i = limitDays - 1; i >= 0; i--) {
+                datesToCheck.push(addDaysToDateString(today, -i));
+            }
+        }
+
+        const total = datesToCheck.length;
+        if (total === 0) {
+            showNotification('No per-day files found in data folder', 'info');
+            _streakProgressHide();
+            if (computeBtn) computeBtn.disabled = false; if (currentBtn) currentBtn.disabled = false;
+            return false;
+        }
+
+        const activeDates = [];
+        const CHUNK = 5;
+        for (let i = 0; i < total; i += CHUNK) {
+            const chunk = datesToCheck.slice(i, i + CHUNK);
+            const promises = chunk.map(async (dateStr, idx) => {
+                const processedIndex = i + idx + 1;
+                _streakProgressUpdate(processedIndex, total, dateStr);
+                try {
+                    const r = await fetchDateFromGit(dateStr);
+                    if (r && r.status === 200 && Array.isArray(r.entries)) {
+                        const hasActive = r.entries.some(en => !(en && en._meta === 'dailyWeight'));
+                        if (hasActive) activeDates.push(dateStr);
+                    }
+                } catch (e) {
+                    dbg('computeLongestStreakFullScan: fetchDateFromGit error for ' + dateStr + ' : ' + (e && e.message), 'warn', e);
+                }
+            });
+            await Promise.all(promises);
+        }
+
+        // Compute longest consecutive run from activeDates (ascending)
+        activeDates.sort();
+        let longest = 0;
+        let longestStart = null;
+        let longestEnd = null;
+        let run = 0;
+        let runStart = null;
+        for (let i = 0; i < activeDates.length; i++) {
+            if (i === 0) {
+                run = 1;
+                runStart = activeDates[0];
+            } else {
+                const prev = new Date(activeDates[i - 1]);
+                const cur = new Date(activeDates[i]);
+                const diff = Math.round((cur - prev) / (24 * 3600 * 1000));
+                if (diff === 1) {
+                    run++;
+                } else {
+                    if (run > longest) {
+                        longest = run;
+                        longestStart = runStart;
+                        longestEnd = activeDates[i - 1];
+                    }
+                    run = 1;
+                    runStart = activeDates[i];
+                }
+            }
+        }
+        // Finalize last-run check
+        if (run > longest) {
+            longest = run;
+            longestStart = runStart;
+            longestEnd = activeDates.length ? activeDates[activeDates.length - 1] : runStart;
+        }
+
+        // Respect previously persisted longest streak if it's larger, but validate dates
+        const persistedLongest = state.streak?.longestStreak || 0;
+        let finalLongest = longest;
+        let finalLongestStart = longestStart;
+        let finalLongestEnd = longestEnd;
+
+        // Helper: inclusive length between two YYYY-MM-DD strings
+        function dateRangeLengthInclusive(a, b) {
+            try {
+                const sa = new Date(a);
+                const sb = new Date(b);
+                const diff = Math.round((sb - sa) / (24 * 3600 * 1000)) + 1;
+                return diff > 0 ? diff : 0;
+            } catch (e) { return 0; }
+        }
+
+        if (persistedLongest > finalLongest && state.streak?.longestStartDate && state.streak?.longestEndDate) {
+            // Prefer persisted date range but compute its actual length to ensure consistency
+            const len = dateRangeLengthInclusive(state.streak.longestStartDate, state.streak.longestEndDate);
+            if (len > 0) {
+                finalLongest = len;
+                finalLongestStart = state.streak.longestStartDate;
+                finalLongestEnd = state.streak.longestEndDate;
+            } else {
+                // Fallback to computed values if persisted dates are invalid
+                finalLongest = longest;
+            }
+        } else {
+            // If we have computed start/end, ensure numeric longest matches the date range
+            if (finalLongestStart && finalLongestEnd) {
+                const len = dateRangeLengthInclusive(finalLongestStart, finalLongestEnd);
+                if (len > 0) finalLongest = len;
+            }
+        }
+
+        const lastActiveDate = activeDates.length ? activeDates[activeDates.length - 1] : null;
+
+        // Prepare small persisted object (do NOT include large arrays like activeDates)
+        const persistObj = Object.assign({}, state.streak || {}, {
+            currentStreak: state.streak?.currentStreak || 0,
+            longestStreak: finalLongest,
+            longestStartDate: finalLongestStart || null,
+            longestEndDate: finalLongestEnd || null,
+            lastActiveDate: lastActiveDate,
+            computedAt: new Date().toISOString()
+        });
+        try { localStorage.setItem('streak_cache', JSON.stringify(persistObj)); } catch (e) {}
+        // Keep an in-memory list of recent active dates for the UI (not persisted)
+        state.streak = Object.assign({}, state.streak || {}, persistObj, { recentActiveDates: activeDates.slice(-90) });
+        const ok = await pushStreakFile(persistObj);
+        try { updateStreakUI(); } catch (e) {}
+        _streakProgressHide();
+        if (computeBtn) computeBtn.disabled = false; if (currentBtn) currentBtn.disabled = false;
+        showNotification(ok ? 'Longest streak computed and persisted' : 'Longest streak computed (failed to persist)', ok ? 'write' : 'warn');
+        return ok;
+    } catch (e) {
+        dbg('computeLongestStreakFullScan error: ' + (e && e.message), 'error', e);
+        showNotification('Error computing longest streak', 'error');
+        _streakProgressHide();
+        if (computeBtn) computeBtn.disabled = false; if (currentBtn) currentBtn.disabled = false;
+        return false;
+    }
+}
+
+async function computeCurrentStreakUI() {
+    try {
+        await computeCurrentStreakSequential();
+    } catch (e) {
+        dbg('computeCurrentStreakUI error: ' + (e && e.message), 'error', e);
+        showNotification('Failed to compute current streak', 'error');
+    }
+}
+
+async function computeCurrentStreakSequential() {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) { showNotification('Missing GitHub credentials; configure in Settings first', 'error'); showPage('settings'); return false; }
+    const dataFolder = getConfig('dataFolder') || 'data';
+    const listUrl = `https://api.github.com/repos/${repo}/contents/${dataFolder}`;
+    const computeBtn = document.getElementById('compute-longest-btn');
+    const currentBtn = document.getElementById('compute-current-btn');
+    if (computeBtn) computeBtn.disabled = true;
+    if (currentBtn) currentBtn.disabled = true;
+    _streakProgressShow();
+
+    try {
+        const res = await fetch(listUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+        if (!res.ok) { showNotification('Failed to list data folder for current-streak compute', 'error'); _streakProgressHide(); if (computeBtn) computeBtn.disabled = false; if (currentBtn) currentBtn.disabled = false; return false; }
+        const items = await res.json();
+        const existingDates = (items || []).filter(it => it && it.type === 'file' && /^\d{4}-\d{2}-\d{2}\.json$/.test(it.name)).map(it => it.name.replace('.json',''));
+        if (existingDates.length === 0) { showNotification('No per-day files found', 'info'); _streakProgressHide(); if (computeBtn) computeBtn.disabled = false; if (currentBtn) currentBtn.disabled = false; return false; }
+
+        // Build a set of available date filenames for fast membership checks
+        const dateSet = new Set(existingDates);
+        existingDates.sort(); // ascending (oldest -> newest)
+        const earliest = existingDates[0];
+        const today = getTodayString();
+        // Compute total days to scan (cap to avoid extremely long progress bars)
+        const capDays = 365;
+        let totalDays = Math.round((new Date(today) - new Date(earliest)) / (24 * 3600 * 1000)) + 1;
+        if (!totalDays || totalDays <= 0) totalDays = existingDates.length;
+        if (totalDays > capDays) totalDays = capDays;
+
+        let processed = 0;
+        let count = 0;
+        let lastActive = null;
+
+        function prevDateStr(ds) {
+            const d = new Date(ds);
+            d.setDate(d.getDate() - 1);
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        }
+
+        // Walk backwards day-by-day from today; stop on first missing or empty day
+        let cursor = today;
+        for (let i = 0; i < totalDays; i++) {
+            processed++;
+            _streakProgressUpdate(processed, totalDays, cursor);
+            // Missing per-day file counts as a break
+            if (!dateSet.has(cursor)) {
+                break;
+            }
+            try {
+                const r = await fetchDateFromGit(cursor);
+                if (r && r.status === 200 && Array.isArray(r.entries)) {
+                    const hasActive = r.entries.some(en => !(en && en._meta === 'dailyWeight'));
+                    if (hasActive) { count++; if (!lastActive) lastActive = cursor; cursor = prevDateStr(cursor); continue; }
+                }
+                // Empty or non-active day -> break the streak
+                break;
+            } catch (e) {
+                dbg('computeCurrentStreakSequential: fetchDateFromGit error for ' + cursor + ' : ' + (e && e.message), 'warn', e);
+                break;
+            }
+        }
+
+        // Update streak state
+        const currentEnd = lastActive || null;
+        let currentStart = null;
+        if (currentEnd && count > 0) {
+            // Derive start from end and count (inclusive)
+            currentStart = addDaysToDateString(currentEnd, -(count - 1));
+        }
+
+        // Prepare small persisted object (exclude large arrays)
+        const persistObj = Object.assign({}, state.streak || {}, {
+            currentStreak: count,
+            currentStartDate: currentStart,
+            currentEndDate: currentEnd,
+            lastActiveDate: currentEnd,
+            computedAt: new Date().toISOString()
+        });
+
+        // If current exceeds stored longest, update longest fields as well
+        const prevLongest = state.streak?.longestStreak || 0;
+        if (count > prevLongest) {
+            persistObj.longestStreak = count;
+            persistObj.longestStartDate = currentStart;
+            persistObj.longestEndDate = currentEnd;
+        }
+
+        try { localStorage.setItem('streak_cache', JSON.stringify(persistObj)); } catch (e) {}
+        // Keep a short in-memory list of the current run's dates for the UI
+        const runDates = (currentStart && currentEnd) ? (function() {
+            const arr = [];
+            let d = new Date(currentStart);
+            const e = new Date(currentEnd);
+            while (d <= e) {
+                arr.push(formatDateLocal(d));
+                d.setDate(d.getDate() + 1);
+            }
+            return arr;
+        })() : [];
+        state.streak = Object.assign({}, state.streak || {}, persistObj, { recentActiveDates: runDates.slice(-90) });
+        const ok = await pushStreakFile(persistObj);
+        try { updateStreakUI(); } catch (e) {}
+        _streakProgressHide();
+        if (computeBtn) computeBtn.disabled = false; if (currentBtn) currentBtn.disabled = false;
+        showNotification(ok ? `Current streak ${count}d computed and saved` : `Current streak ${count}d computed (failed to persist)`, ok ? 'write' : 'warn');
+        return ok;
+    } catch (e) {
+        dbg('computeCurrentStreakSequential error: ' + (e && e.message), 'error', e);
+        showNotification('Error computing current streak', 'error');
+        _streakProgressHide();
+        if (computeBtn) computeBtn.disabled = false; if (currentBtn) currentBtn.disabled = false;
+        return false;
+    }
+}
+
+// Expose to window for inline onclick handlers
+async function computeDateFilesCountUI() {
+    try {
+        await computeDateFilesCount();
+    } catch (e) {
+        dbg('computeDateFilesCountUI error: ' + (e && e.message), 'error', e);
+        showNotification('Failed to count date files', 'error');
+    }
+}
+
+async function computeDateFilesCount() {
+    const token = localStorage.getItem('gt_token');
+    const repo = localStorage.getItem('gt_repo');
+    if (!token || !repo) { showNotification('Missing GitHub credentials; configure in Settings first', 'error'); showPage('settings'); return false; }
+    const dataFolder = getConfig('dataFolder') || 'data';
+    const listUrl = `https://api.github.com/repos/${repo}/contents/${dataFolder}`;
+    _streakProgressShow();
+    const countBtn = document.getElementById('count-datefiles-btn');
+    const computeBtn = document.getElementById('compute-longest-btn');
+    const currentBtn = document.getElementById('compute-current-btn');
+    if (countBtn) countBtn.disabled = true;
+    if (computeBtn) computeBtn.disabled = true;
+    if (currentBtn) currentBtn.disabled = true;
+    try {
+        const res = await fetch(listUrl, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+        if (!res.ok) {
+            const txt = await res.text().catch(() => '');
+            dbg('computeDateFilesCount: failed to list folder: ' + (txt || res.statusText), 'error');
+            showNotification('Failed to list data folder', 'error');
+            _streakProgressHide();
+            if (countBtn) countBtn.disabled = false; if (computeBtn) computeBtn.disabled = false; if (currentBtn) currentBtn.disabled = false;
+            return false;
+        }
+        const items = await res.json();
+        const dateItems = (items || []).filter(it => it && it.type === 'file' && /^\d{4}-\d{2}-\d{2}\.json$/.test(it.name));
+        const total = dateItems.length;
+        const el = document.getElementById('streak-datefiles-count');
+        if (el) el.textContent = String(total);
+        _streakProgressHide();
+        if (countBtn) countBtn.disabled = false; if (computeBtn) computeBtn.disabled = false; if (currentBtn) currentBtn.disabled = false;
+        showNotification(`Found ${total} date files in ${dataFolder}`, 'info');
+        return total;
+    } catch (e) {
+        dbg('computeDateFilesCount error: ' + (e && e.message), 'error', e);
+        _streakProgressHide();
+        if (countBtn) countBtn.disabled = false; if (computeBtn) computeBtn.disabled = false; if (currentBtn) currentBtn.disabled = false;
+        showNotification('Error counting date files', 'error');
+        return false;
+    }
+}
+
+try { window.computeLongestStreakFullScanUI = computeLongestStreakFullScanUI; window.computeCurrentStreakUI = computeCurrentStreakUI; window.computeDateFilesCountUI = computeDateFilesCountUI; } catch (e) { /* ignore */ }
+
+function updateStreakUI() {
+    try {
+        const el = document.getElementById('streak-badge');
+        const hs = document.getElementById('history-streak-count');
+        const hb = document.getElementById('history-streak-best');
+        const s = state.streak || {};
+        const cur = s.currentStreak || 0;
+        const best = s.longestStreak || 0;
+        if (el) { el.textContent = `🔥 ${cur}d · best ${best}d`; el.title = `Current streak: ${cur} days — Best: ${best} days`; }
+        if (hs) hs.textContent = cur;
+        if (hb) hb.textContent = best;
+        // Update Streaks page values when present
+        const curEl = document.getElementById('streak-current-value');
+        const bestEl = document.getElementById('streak-best-value');
+        const lastEl = document.getElementById('streak-last-computed');
+        if (curEl) curEl.textContent = cur;
+        if (bestEl) bestEl.textContent = best;
+        if (lastEl) lastEl.textContent = s.computedAt ? new Date(s.computedAt).toLocaleString() : 'Never';
+        // Start/End ranges for current and best streaks
+        const curStartEl = document.getElementById('streak-current-start');
+        const curEndEl = document.getElementById('streak-current-end');
+        const bestStartEl = document.getElementById('streak-best-start');
+        const bestEndEl = document.getElementById('streak-best-end');
+        const filesEl = document.getElementById('streak-datefiles-count');
+        const recentEl = document.getElementById('streak-recent-dates');
+        if (curStartEl) curStartEl.textContent = formatDateReadable(s.currentStartDate);
+        if (curEndEl) curEndEl.textContent = formatDateReadable(s.currentEndDate || s.lastActiveDate);
+        if (bestStartEl) bestStartEl.textContent = formatDateReadable(s.longestStartDate);
+        if (bestEndEl) bestEndEl.textContent = formatDateReadable(s.longestEndDate);
+        if (filesEl && typeof s.dateFilesCount !== 'undefined') filesEl.textContent = String(s.dateFilesCount);
+        if (recentEl) {
+            // Render small chips for recent active dates kept in-memory
+            recentEl.innerHTML = '';
+            if (Array.isArray(s.recentActiveDates) && s.recentActiveDates.length) {
+                s.recentActiveDates.forEach(d => {
+                    const sp = document.createElement('span');
+                    sp.textContent = d;
+                    sp.style.padding = '6px 8px';
+                    sp.style.borderRadius = '6px';
+                    sp.style.background = 'var(--bg)';
+                    sp.style.border = '1px solid var(--muted)';
+                    sp.style.fontSize = '12px';
+                    sp.style.color = 'var(--text-secondary)';
+                    sp.style.marginRight = '6px';
+                    recentEl.appendChild(sp);
+                });
+            } else {
+                recentEl.textContent = 'No recent active dates recorded';
+            }
+        }
+        // Update hero elements if present
+        const heroVal = document.getElementById('streak-hero-value');
+        const heroSub = document.getElementById('streak-hero-sub');
+        if (heroVal) heroVal.textContent = cur;
+        if (heroSub) heroSub.textContent = (cur === 1) ? 'day streak' : 'days streak';
+        // Render current month (lazy-loaded) if calendar is present
+        try { showStreakMonth(state.streakCalendar.offsetMonths || 0); } catch (e) { /* ignore */ }
+    } catch (e) { dbg('updateStreakUI error: ' + (e && e.message), 'warn'); }
+}
+
+// Render a simple calendar grid for the last `windowDays` days (default 30)
+function renderStreakCalendar(windowDays) {
+    try {
+        windowDays = parseInt(windowDays || 30, 10) || 30;
+        const container = document.getElementById('streak-calendar');
+        if (!container) return;
+        container.innerHTML = '';
+        const today = new Date();
+        const dates = [];
+        for (let i = windowDays - 1; i >= 0; i--) {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            dates.push(formatDateLocal(d));
+        }
+        const activeSet = new Set((state.streak && Array.isArray(state.streak.recentActiveDates) ? state.streak.recentActiveDates : []).map(x => String(x)));
+        const grid = document.createElement('div');
+        grid.className = 'streak-calendar-grid';
+        const frag = document.createDocumentFragment();
+        dates.forEach(ds => {
+            const chip = document.createElement('div');
+            chip.className = 'streak-chip';
+            chip.title = ds;
+            if (activeSet.has(ds)) {
+                chip.classList.add('active');
+                const icon = document.createElement('span'); icon.className = 'chip-icon'; icon.textContent = '🔥';
+                chip.appendChild(icon);
+            }
+            frag.appendChild(chip);
+        });
+        grid.appendChild(frag);
+        container.appendChild(grid);
+    } catch (e) { dbg('renderStreakCalendar error: ' + (e && e.message), 'warn'); }
+}
+
+// ---- Month navigation + lazy month loader ----
+function computeYearMonthFromOffset(offset) {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + (offset || 0));
+    return { year: d.getFullYear(), monthIndex: d.getMonth() };
+}
+
+function monthKey(year, monthIndex) {
+    return `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+}
+
+function formatMonthLabel(year, monthIndex) {
+    try {
+        return new Date(year, monthIndex, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
+    } catch (e) { return `${year}-${monthIndex + 1}`; }
+}
+
+function streakChangeMonth(delta) {
+    try {
+        state.streakCalendar.offsetMonths = (state.streakCalendar.offsetMonths || 0) + delta;
+        showStreakMonth(state.streakCalendar.offsetMonths);
+    } catch (e) { dbg('streakChangeMonth error: ' + (e && e.message), 'warn', e); }
+}
+
+async function showStreakMonth(offset) {
+    try {
+        const { year, monthIndex } = computeYearMonthFromOffset(offset);
+        const labelEl = document.getElementById('streak-calendar-month-label');
+        if (labelEl) labelEl.textContent = formatMonthLabel(year, monthIndex);
+        const key = monthKey(year, monthIndex);
+        const cache = state.streakCalendar.cache || (state.streakCalendar.cache = {});
+        if (cache[key] && cache[key].loaded) {
+            renderCalendarFromCache(year, monthIndex, cache[key].activeSet);
+            return;
+        }
+        // load lazily
+        if (cache[key] && cache[key].loading) return; // already loading
+        cache[key] = { loading: true, activeSet: new Set() };
+        // disable nav while loading
+        const prevBtn = document.getElementById('streak-prev-month');
+        const nextBtn = document.getElementById('streak-next-month');
+        if (prevBtn) prevBtn.disabled = true; if (nextBtn) nextBtn.disabled = true;
+        _streakProgressShow();
+        const days = [];
+        const first = new Date(year, monthIndex, 1);
+        const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+        for (let d = 1; d <= daysInMonth; d++) {
+            const ds = `${year}-${String(monthIndex + 1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+            days.push(ds);
+        }
+        const CHUNK = 6;
+        const activeSet = new Set();
+        let processed = 0;
+        for (let i = 0; i < days.length; i += CHUNK) {
+            const chunk = days.slice(i, i + CHUNK);
+            const promises = chunk.map(async (dateStr, idx) => {
+                try {
+                    const r = await fetchDateFromGit(dateStr);
+                    processed++;
+                    _streakProgressUpdate(processed, days.length, dateStr);
+                    if (r && r.status === 200 && Array.isArray(r.entries)) {
+                        const hasActive = r.entries.some(en => !(en && en._meta === 'dailyWeight'));
+                        if (hasActive) activeSet.add(dateStr);
+                    }
+                } catch (e) {
+                    processed++;
+                    _streakProgressUpdate(processed, days.length, dateStr);
+                    dbg('showStreakMonth fetch error for ' + dateStr + ' : ' + (e && e.message), 'warn', e);
+                }
+            });
+            await Promise.all(promises);
+        }
+        cache[key].loaded = true;
+        cache[key].loading = false;
+        cache[key].activeSet = activeSet;
+        _streakProgressHide();
+        if (prevBtn) prevBtn.disabled = false; if (nextBtn) nextBtn.disabled = false;
+        renderCalendarFromCache(year, monthIndex, activeSet);
+    } catch (e) {
+        dbg('showStreakMonth error: ' + (e && e.message), 'error', e);
+        _streakProgressHide();
+        const prevBtn = document.getElementById('streak-prev-month');
+        const nextBtn = document.getElementById('streak-next-month');
+        if (prevBtn) prevBtn.disabled = false; if (nextBtn) nextBtn.disabled = false;
+    }
+}
+
+function renderCalendarFromCache(year, monthIndex, activeSet) {
+    try {
+        const grid = document.getElementById('streak-calendar-grid');
+        if (!grid) return;
+        grid.innerHTML = '';
+        // Monday-first mapping
+        const first = new Date(year, monthIndex, 1);
+        const startOffset = (first.getDay() + 6) % 7; // 0=Mon
+        const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+        const totalSlots = startOffset + daysInMonth;
+        const rows = Math.ceil(totalSlots / 7);
+        const frag = document.createDocumentFragment();
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < 7; c++) {
+                const slot = r * 7 + c;
+                const cell = document.createElement('div');
+                cell.className = 'streak-chip';
+                    if (slot < startOffset || slot >= startOffset + daysInMonth) {
+                    // empty day
+                    cell.classList.add('inactive');
+                } else {
+                    const day = slot - startOffset + 1;
+                    const ds = `${year}-${String(monthIndex + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                    cell.title = ds;
+                    // annotate with day number
+                    const dayEl = document.createElement('div'); dayEl.className = 'chip-day'; dayEl.textContent = String(day);
+                    cell.appendChild(dayEl);
+                    if (activeSet && activeSet.has && activeSet.has(ds)) {
+                        cell.classList.add('active');
+                        const icon = document.createElement('span'); icon.className = 'chip-icon'; icon.textContent = '🔥';
+                        cell.appendChild(icon);
+                    }
+                }
+                frag.appendChild(cell);
+            }
+        }
+        grid.appendChild(frag);
+    } catch (e) { dbg('renderCalendarFromCache error: ' + (e && e.message), 'warn', e); }
+}
+
+// NOTE: manual recompute helper removed — streak computations now only run
+// when triggered explicitly via the Settings actions (compute buttons).
+
+
 // Escape HTML for safe insertion into modal details
 function escapeHtml(str) {
     return String(str)
@@ -3879,6 +4997,18 @@ function updateApplyButtonState() {
 }
 
 function filterHistory() {
+    const foodVal = (document.getElementById('filter-food') || {}).value || '';
+    const clearBtn = document.getElementById('hp-search-clear');
+    if (clearBtn) clearBtn.style.display = foodVal ? 'block' : 'none';
+    state.historyPage = 1;
+    renderHistory();
+}
+
+function clearHistorySearch() {
+    const input = document.getElementById('filter-food');
+    if (input) input.value = '';
+    const clearBtn = document.getElementById('hp-search-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
     state.historyPage = 1;
     renderHistory();
 }
@@ -4104,67 +5234,79 @@ function editEntry(index) {
     
     // Create edit form
     const editForm = document.createElement('div');
-    editForm.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 16px 0;';
-    
+    editForm.className = 'edit-form-grid';
+
     const fields = [
-        { name: 'food', label: 'Food', type: 'text' },
-        { name: 'calories', label: 'Calories', type: 'number' },
-        { name: 'protein', label: 'Protein (g)', type: 'number' },
-        { name: 'carbs', label: 'Carbs (g)', type: 'number' },
-        { name: 'fat', label: 'Fat (g)', type: 'number' },
-        { name: 'healthScore', label: 'Health Score (1-10)', type: 'number' },
-        { name: 'date', label: 'Date', type: 'date' }
+        { name: 'food',        label: 'Food',                type: 'text',   span: 2 },
+        { name: 'calories',    label: 'Calories (kcal)',      type: 'number' },
+        { name: 'date',        label: 'Date',                type: 'date'   },
+        { name: 'protein',     label: 'Protein (g)',          type: 'number' },
+        { name: 'carbs',       label: 'Carbs (g)',            type: 'number' },
+        { name: 'fat',         label: 'Fat (g)',              type: 'number' },
+        { name: 'healthScore', label: 'Health Score (1–10)',  type: 'select' },
     ];
-    
+
     fields.forEach(field => {
-            let input;
-            if (field.name === 'healthScore') {
-                input = document.createElement('select');
-                input.id = `edit-${field.name}-${index}`;
-                input.style.cssText = 'padding: 10px; border: 1px solid var(--border); border-radius: 8px;';
-                const empty = document.createElement('option'); empty.value = ''; empty.textContent = 'Score'; input.appendChild(empty);
-                for (let s = 1; s <= 10; s++) {
-                    const o = document.createElement('option'); o.value = String(s); o.textContent = String(s);
-                    if (entry[field.name] !== undefined && parseInt(entry[field.name], 10) === s) o.selected = true;
-                    input.appendChild(o);
-                }
-            } else {
-                input = document.createElement('input');
-                input.type = field.type;
-                input.id = `edit-${field.name}-${index}`;
-                input.value = entry[field.name] || '';
-                input.placeholder = field.label;
-                input.style.cssText = 'padding: 10px; border: 1px solid var(--border); border-radius: 8px;';
+        const wrap = document.createElement('div');
+        wrap.className = 'sc-field' + (field.span === 2 ? ' efg-span2' : '');
+        const lbl = document.createElement('label');
+        lbl.className = 'sc-label';
+        lbl.htmlFor = `edit-${field.name}-${index}`;
+        lbl.textContent = field.label;
+        wrap.appendChild(lbl);
+
+        let input;
+        if (field.name === 'healthScore') {
+            input = document.createElement('select');
+            input.id = `edit-${field.name}-${index}`;
+            input.className = 'form-input sc-input';
+            const empty = document.createElement('option'); empty.value = ''; empty.textContent = '— Score —'; input.appendChild(empty);
+            for (let s = 1; s <= 10; s++) {
+                const o = document.createElement('option'); o.value = String(s); o.textContent = String(s);
+                if (entry[field.name] !== undefined && parseInt(entry[field.name], 10) === s) o.selected = true;
+                input.appendChild(o);
             }
-            editForm.appendChild(input);
+        } else {
+            input = document.createElement('input');
+            input.type = field.type;
+            input.id = `edit-${field.name}-${index}`;
+            input.className = 'form-input sc-input';
+            input.value = entry[field.name] || '';
+            input.placeholder = field.label;
+        }
+        wrap.appendChild(input);
+        editForm.appendChild(wrap);
     });
-    
-    // Add time dropdown
-    const timeSelect = document.createElement('select');
-    timeSelect.id = `edit-time-${index}`;
-    timeSelect.style.cssText = 'padding: 10px; border: 1px solid var(--border); border-radius: 8px;';
-    ['Current Time', 'Breakfast (9:00 AM)', 'Lunch (1:00 PM)', 'Dinner (7:00 PM)', 'Snack (3:00 PM)'].forEach(opt => {
-        const option = document.createElement('option');
-        option.value = opt;
-        option.textContent = opt;
-        if (entry.time === opt) option.selected = true;
-        timeSelect.appendChild(option);
-    });
-    editForm.appendChild(timeSelect);
-    
+
+    // Time field — native <input type="time">
+    const timeWrap = document.createElement('div');
+    timeWrap.className = 'sc-field';
+    const timeLbl = document.createElement('label');
+    timeLbl.className = 'sc-label';
+    timeLbl.htmlFor = `edit-time-${index}`;
+    timeLbl.textContent = 'Meal Time';
+    const timeInpE = document.createElement('input');
+    timeInpE.type = 'time';
+    timeInpE.id = `edit-time-${index}`;
+    timeInpE.className = 'form-input sc-input';
+    timeInpE.value = _timeTo24(entry.time || '');
+    timeWrap.appendChild(timeLbl);
+    timeWrap.appendChild(timeInpE);
+    editForm.appendChild(timeWrap);
+
     const buttonWrapper = document.createElement('div');
-    buttonWrapper.style.cssText = 'grid-column: span 2; display: flex; gap: 8px;';
-    
+    buttonWrapper.className = 'efg-span2 efg-actions';
+
     const saveBtn = document.createElement('button');
-    saveBtn.textContent = '💾 Save';
+    saveBtn.textContent = 'Save';
     saveBtn.className = 'btn-primary';
-    saveBtn.style.cssText = 'flex: 1; padding: 10px;';
+    saveBtn.style.cssText = 'font-size:15px; padding:12px 0;';
     saveBtn.onclick = () => saveEdit(index);
-    
+
     const cancelBtn = document.createElement('button');
-    cancelBtn.textContent = '❌ Cancel';
+    cancelBtn.textContent = 'Cancel';
     cancelBtn.className = 'btn-secondary';
-    cancelBtn.style.cssText = 'flex: 1; padding: 10px;';
+    cancelBtn.style.cssText = 'font-size:15px; padding:12px 0; margin:0;';
     cancelBtn.onclick = () => renderHistory();
     
     buttonWrapper.appendChild(saveBtn);
@@ -4189,13 +5331,10 @@ function saveEdit(index) {
     const hsVal = parseInt(document.getElementById(`edit-healthScore-${index}`).value, 10);
     entry.healthScore = (!isNaN(hsVal) ? hsVal : undefined);
     entry.date = document.getElementById(`edit-date-${index}`).value;
-    entry.time = document.getElementById(`edit-time-${index}`).value;
-    
-    // Handle Current Time conversion
-    if (entry.time === 'Current Time') {
-        const now = new Date();
-        entry.time = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    }
+    const rawTime = document.getElementById(`edit-time-${index}`).value;
+    entry.time = rawTime
+        ? _time24to12(rawTime)
+        : (entry.time || new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }));
     
     render();
     renderHistory();
@@ -4231,6 +5370,205 @@ async function deleteEntryGlobal(index) {
         dbg(`Auto-save delete failed: ${e.message}`, 'error');
     }
 }
+
+// ── Entry Preview Modal (pre-filled before saving) ───────────────────────────
+// Shared state for the preview modal
+const _entryPreviewState = { entry: null, mode: null /* 'today' | 'repeat' */ };
+
+    const TIME_OPTIONS = ['Current Time', 'Breakfast (9:00 AM)', 'Lunch (1:00 PM)', 'Dinner (7:00 PM)', 'Snack (3:00 PM)', 'Evening (8:00 PM)'];
+
+    function _smartTimeDefault() {
+        const h = new Date().getHours();
+        if (h >= 5  && h < 11) return 'Breakfast (9:00 AM)';
+        if (h >= 11 && h < 15) return 'Lunch (1:00 PM)';
+        if (h >= 15 && h < 18) return 'Snack (3:00 PM)';
+        if (h >= 18 && h < 22) return 'Dinner (7:00 PM)';
+        return 'Current Time';
+    }
+
+function openEntryPreviewModal(source, mode) {
+    const today = getTodayString();
+    const now = new Date();
+    const entry = {
+        food:        source.food        || '',
+        calories:    source.calories    || 0,
+        protein:     source.protein     || '',
+        carbs:       source.carbs       || '',
+        fat:         source.fat         || '',
+        healthScore: source.healthScore != null ? source.healthScore : '',
+        date:        today,
+        time:        source.time || _smartTimeDefault(),
+        timestamp:   now.toISOString(),
+    };
+    _entryPreviewState.entry = entry;
+    _entryPreviewState.mode  = mode;
+
+    const titleEl = document.getElementById('entry-preview-title');
+    const hintEl  = document.getElementById('entry-preview-hint');
+    if (titleEl) titleEl.textContent = mode === 'repeat' ? '🔁 Add Another Serving' : '➕ Add to Today';
+    if (hintEl) hintEl.textContent = mode === 'repeat'
+        ? 'Review and adjust the entry before adding another serving.'
+        : 'Review and adjust the entry before adding it to today\'s log.';
+
+    const form = document.getElementById('entry-preview-form');
+    if (!form) return;
+    form.innerHTML = '';
+
+    const fields = [
+        { id: 'ep-food',        label: 'Food',               type: 'text',   val: entry.food,        required: true },
+        { id: 'ep-calories',    label: 'Calories (kcal)',     type: 'number', val: entry.calories,    required: true, min: 0 },
+        { id: 'ep-date',        label: 'Date',               type: 'date',   val: entry.date,        required: true },
+        { id: 'ep-protein',     label: 'Protein (g)',         type: 'number', val: entry.protein,     required: false, min: 0 },
+        { id: 'ep-carbs',       label: 'Carbs (g)',           type: 'number', val: entry.carbs,       required: false, min: 0 },
+        { id: 'ep-fat',         label: 'Fat (g)',             type: 'number', val: entry.fat,         required: false, min: 0 },
+        { id: 'ep-healthScore', label: 'Health Score (1–10)', type: 'number', val: entry.healthScore, required: false, min: 1, max: 10 },
+    ];
+
+    fields.forEach(f => {
+        const wrap = document.createElement('div');
+        wrap.className = 'sc-field';
+        const lbl = document.createElement('label');
+        lbl.className = 'sc-label';
+        lbl.htmlFor = f.id;
+        lbl.textContent = f.label + (f.required ? ' *' : '');
+        const inp = document.createElement('input');
+        inp.type = f.type;
+        inp.id = f.id;
+        inp.className = 'form-input sc-input';
+        inp.style.marginBottom = '0';
+        if (f.val !== '' && f.val != null) inp.value = f.val;
+        if (f.min !== undefined) inp.min = f.min;
+        if (f.max !== undefined) inp.max = f.max;
+        if (f.required) inp.required = true;
+        wrap.appendChild(lbl); wrap.appendChild(inp);
+        form.appendChild(wrap);
+    });
+
+    // Time field with drum-picker trigger (consistent across all edit forms)
+    const timeWrap = document.createElement('div');
+    timeWrap.className = 'sc-field';
+    const timeLbl = document.createElement('label');
+    timeLbl.className = 'sc-label';
+    timeLbl.htmlFor = 'ep-time';
+    timeLbl.textContent = 'Meal Time';
+    const timeInp = document.createElement('input');
+    timeInp.type = 'time';
+    timeInp.id = 'ep-time';
+    timeInp.className = 'form-input sc-input';
+    timeInp.style.marginBottom = '0';
+    // Smart default in 24h
+    const defaultTime = (() => {
+        const h = new Date().getHours();
+        if (h >= 5  && h < 11) return '09:00';
+        if (h >= 11 && h < 15) return '13:00';
+        if (h >= 15 && h < 18) return '15:00';
+        if (h >= 18 && h < 22) return '19:00';
+        return '20:00';
+    })();
+    timeInp.value = entry.time && entry.time !== 'Current Time' ? _timeTo24(entry.time) : defaultTime;
+    timeWrap.appendChild(timeLbl);
+    timeWrap.appendChild(timeInp);
+    form.appendChild(timeWrap);
+
+    const modal = document.getElementById('entry-preview-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeEntryPreviewModal() {
+    const modal = document.getElementById('entry-preview-modal');
+    if (modal) modal.style.display = 'none';
+    _entryPreviewState.entry = null;
+    _entryPreviewState.mode  = null;
+}
+
+async function commitEntryPreview() {
+    const food     = document.getElementById('ep-food')?.value?.trim();
+    const calories = parseFloat(document.getElementById('ep-calories')?.value);
+    const date     = document.getElementById('ep-date')?.value || getTodayString();
+    const rawTime  = document.getElementById('ep-time')?.value?.trim() || '';
+    const time     = rawTime
+        ? _time24to12(rawTime)
+        : new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+
+    if (!food || isNaN(calories)) {
+        alert('Food name and calories are required.');
+        return;
+    }
+
+    const now = new Date(`${date}T${new Date().toTimeString().slice(0,8)}`);
+    const newEntry = {
+        food, calories,
+        date,
+        time,
+        timestamp: now.toISOString(),
+    };
+
+    const rawProtein = parseFloat(document.getElementById('ep-protein')?.value);
+    const rawCarbs   = parseFloat(document.getElementById('ep-carbs')?.value);
+    const rawFat     = parseFloat(document.getElementById('ep-fat')?.value);
+    const rawHs      = parseInt(document.getElementById('ep-healthScore')?.value, 10);
+    if (!isNaN(rawProtein) && rawProtein > 0)  newEntry.protein     = rawProtein;
+    if (!isNaN(rawCarbs)   && rawCarbs   > 0)  newEntry.carbs       = rawCarbs;
+    if (!isNaN(rawFat)     && rawFat     > 0)  newEntry.fat         = rawFat;
+    if (!isNaN(rawHs)      && rawHs >= 1 && rawHs <= 10) newEntry.healthScore = rawHs;
+
+    const saveBtn = document.getElementById('entry-preview-save-btn');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ Saving…'; }
+
+    const ok = await pushEntryForDate(date, newEntry);
+
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Save Entry'; }
+
+    if (ok) {
+        state.entries.push(newEntry);
+        closeEntryPreviewModal();
+        // Navigate to tracker if adding to today
+        if (date === getTodayString()) showPage('tracker');
+        render();
+        renderHistory();
+        showNotification(`Added "${food}" to ${date}`, 'write');
+    } else {
+        alert('Failed to save entry. Check logs.');
+    }
+}
+
+// Clone a history entry → open pre-fill modal
+function addEntryToToday(globalIndex) {
+    const source = state.entries[globalIndex];
+    if (!source) { dbg('addEntryToToday: not found ' + globalIndex, 'warn'); return; }
+    openEntryPreviewModal(source, 'today');
+}
+
+// Repeat tracker entry → open pre-fill modal
+function repeatEntryToday(globalIndex) {
+    const source = state.entries[globalIndex];
+    if (!source) { dbg('repeatEntryToday: not found ' + globalIndex, 'warn'); return; }
+    openEntryPreviewModal(source, 'repeat');
+}
+
+// Open the Trend Explorer in a new window, sharing current entries via localStorage
+function openGraphingCalculator() {
+    try {
+        localStorage.setItem('gt_graphing_entries', JSON.stringify(state.entries || []));
+    } catch (e) { dbg('openGraphingCalculator: failed to write entries to localStorage: ' + e.message, 'warn'); }
+    window.open('graphing-calculator.html', '_blank', 'width=960,height=720,resizable=yes');
+}
+
+// Download a full JSON report of all tracked data
+function openReportPage() {
+    try {
+        // Pass all entries to report page via localStorage
+        localStorage.setItem('gt_report_entries', JSON.stringify(state.entries || []));
+        window.open('report-generator.html', '_blank', 'width=800,height=700,resizable=yes');
+        dbg('Opened Report Generator page', 'info');
+    } catch (e) {
+        dbg('openReportPage error: ' + e.message, 'error');
+        alert('Failed to open report page. Check logs.');
+    }
+}
+
+// Legacy alias
+function downloadJsonReport() { openReportPage(); }
 
 // --- ANALYTICS PAGE ---
 let charts = {};
@@ -4335,55 +5673,58 @@ async function renderAnalytics(date) {
         mealData[time] = (mealData[time] || 0) + (parseFloat(e.calories) || 0);
     });
     
+    // Shared doughnut chart options factory
+    function _doughnutOptions(labelFormatter, tooltipFormatter) {
+        const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e';
+        return {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '65%',
+            layout: { padding: { right: 12 } },
+            animation: { animateRotate: true, duration: 500 },
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        color: textColor,
+                        boxWidth: 12,
+                        padding: 14,
+                        font: { size: 12, weight: '500' },
+                        generateLabels: function(chart) {
+                            const tc = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e';
+                            const data = (chart.data.datasets[0] && chart.data.datasets[0].data) || [];
+                            const labels = chart.data.labels || [];
+                            const total = data.reduce((s, v) => s + (parseFloat(v) || 0), 0) || 1;
+                            return labels.map((lab, i) => ({
+                                text: labelFormatter(lab, parseFloat(data[i]) || 0, total),
+                                fillStyle: (chart.data.datasets[0].backgroundColor || [])[i] || '#999',
+                                strokeStyle: 'transparent',
+                                lineWidth: 0,
+                                color: tc,
+                                fontColor: tc,
+                                hidden: false,
+                                index: i
+                            }));
+                        }
+                    }
+                },
+                tooltip: { callbacks: { label: tooltipFormatter } }
+            }
+        };
+    }
+    const _DONUT_COLORS = ['#007aff', '#5856d6', '#34c759', '#ff9500', '#ff3b30', '#af52de', '#ff6b00', '#30b0c7'];
+
     if (Object.keys(mealData).length > 0) {
         charts.meal = new Chart(document.getElementById('chart-meal-distribution'), {
             type: 'doughnut',
             data: {
                 labels: Object.keys(mealData),
-                datasets: [{
-                    data: Object.values(mealData),
-                    backgroundColor: ['#007aff', '#5856d6', '#34c759', '#ff9500', '#ff3b30', '#af52de']
-                }]
+                datasets: [{ data: Object.values(mealData), backgroundColor: _DONUT_COLORS }]
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                aspectRatio: 2,
-                layout: { padding: { right: 16 } },
-                plugins: {
-                    legend: {
-                        position: 'right',
-                        labels: {
-                            color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e',
-                            boxWidth: 14,
-                            padding: 16,
-                            font: { size: 13 },
-                            generateLabels: function(chart) {
-                                const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e';
-                                const data = (chart.data.datasets && chart.data.datasets[0] && chart.data.datasets[0].data) || [];
-                                const labels = chart.data.labels || [];
-                                return labels.map((lab, i) => ({
-                                    text: lab,
-                                    fillStyle: (chart.data.datasets[0].backgroundColor || [])[i] || '#000',
-                                    strokeStyle: 'transparent',
-                                    lineWidth: 0,
-                                    fontColor: textColor,
-                                    color: textColor,
-                                    hidden: false,
-                                    index: i
-                                }));
-                            }
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return context.label + ': ' + Math.round(context.parsed) + ' kcal';
-                            }
-                        }
-                    }
-                }
-            }
+            options: _doughnutOptions(
+                (lab, val, total) => `${lab}: ${Math.round(val)} kcal (${Math.round(val/total*100)}%)`,
+                ctx => `${ctx.label}: ${Math.round(ctx.parsed)} kcal`
+            )
         });
         // Compute and display total calories for the meal distribution chart
         try {
@@ -4411,60 +5752,16 @@ async function renderAnalytics(date) {
                 type: 'doughnut',
                 data: {
                     labels: ['Protein', 'Carbs', 'Fat'],
-                    datasets: [{
-                        data: [totalProtein, totalCarbs, totalFat],
-                        backgroundColor: ['#007aff', '#5856d6', '#34c759']
-                    }]
+                    datasets: [{ data: [totalProtein, totalCarbs, totalFat], backgroundColor: _DONUT_COLORS }]
                 },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    aspectRatio: 2,
-                    layout: { padding: { right: 16 } },
-                    plugins: {
-                        legend: {
-                            position: 'right',
-                            labels: {
-                                color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e',
-                                boxWidth: 14,
-                                padding: 16,
-                                font: { size: 13 },
-                                // Generate labels that include grams and percentage
-                                generateLabels: function(chart) {
-                                    const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e';
-                                    const data = (chart.data.datasets && chart.data.datasets[0] && chart.data.datasets[0].data) || [];
-                                    const labels = chart.data.labels || [];
-                                    const total = data.reduce((s, v) => s + (parseFloat(v) || 0), 0) || 1;
-                                    return labels.map((lab, i) => {
-                                        const value = parseFloat(data[i]) || 0;
-                                        const pct = Math.round((value / total) * 100);
-                                        return {
-                                            text: `${lab}: ${Math.round(value)}g (${pct}%)`,
-                                            fillStyle: (chart.data.datasets[0].backgroundColor || [])[i] || '#000',
-                                            strokeStyle: 'transparent',
-                                            lineWidth: 0,
-                                            fontColor: textColor,
-                                            color: textColor,
-                                            hidden: false,
-                                            index: i
-                                        };
-                                    });
-                                }
-                            }
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    const value = context.parsed || 0;
-                                    const dataArr = context.dataset.data || [];
-                                    const total = dataArr.reduce((s, v) => s + (parseFloat(v) || 0), 0);
-                                    const pct = total > 0 ? Math.round((value / total) * 100) : 0;
-                                    return `${context.label}: ${Math.round(value)}g (${pct}%)`;
-                                }
-                            }
-                        }
+                options: _doughnutOptions(
+                    (lab, val, total) => `${lab}: ${Math.round(val)}g (${Math.round(val/total*100)}%)`,
+                    ctx => {
+                        const val = ctx.parsed || 0;
+                        const total = (ctx.dataset.data || []).reduce((s,v) => s+(parseFloat(v)||0), 0);
+                        return `${ctx.label}: ${Math.round(val)}g (${total>0?Math.round(val/total*100):0}%)`;
                     }
-                }
+                )
             });
         } catch (e) {
             dbg(`Macro chart render error: ${e && e.message}`, 'error', e);
@@ -4516,99 +5813,121 @@ async function renderAnalytics(date) {
         ctx.fillText('No macro data available for this day', macroCanvas.width / 2, macroCanvas.height / 2);
     }
 
-    // Health Score vs Macro Amount (binned averages, one smooth line per macro)
+    // Nutrition Quality Breakdown (replaces Health Score vs Macro)
+    // Spirit: show how THIS day's meals rank in health quality, and what proportion of
+    // total calories come from "quality" meals (score ≥ 7) vs "moderate" (4–6) vs "low" (1–3)
     try {
-        const healthChartEl = document.getElementById('chart-macro-health-distribution');
-        if (healthChartEl) {
-            // Controls
-            const modeEl = document.getElementById('macro-health-mode');
-            const ptsEl = document.getElementById('macro-health-points');
-            const mode = modeEl ? modeEl.value : 'absolute';
-            const showPoints = ptsEl ? !!ptsEl.checked : true;
+        const nqbEl = document.getElementById('ac-nqb-content');
+        if (nqbEl) {
+            nqbEl.innerHTML = '';
 
-            // Helper: build average macro amount per health score bin, and capture raw points
-            function buildMacroHealthByScore(macroName) {
-                const groups = {};
-                const raw = [];
-                filtered.forEach(e => {
+            const hasMacros = totalProtein > 0 || totalCarbs > 0 || totalFat > 0;
+            const totalCals = filtered.reduce((s, e) => s + (parseFloat(e.calories) || 0), 0);
+
+            // ── Calorie quality tiers ──
+            const tiers = { high: 0, mid: 0, low: 0, unscored: 0 };
+            filtered.forEach(e => {
+                const hs = parseInt(e.healthScore, 10);
+                const kcal = parseFloat(e.calories) || 0;
+                if (isNaN(hs)) { tiers.unscored += kcal; }
+                else if (hs >= 7) { tiers.high += kcal; }
+                else if (hs >= 4) { tiers.mid  += kcal; }
+                else              { tiers.low  += kcal; }
+            });
+
+            const scored = filtered.filter(e => !isNaN(parseInt(e.healthScore, 10)));
+            const hasScores = scored.length > 0;
+
+            // ── Overall day score ──
+            if (hasScores && totalCals > 0) {
+                const scoredCals = tiers.high + tiers.mid + tiers.low;
+                // Weighted average: (kcal contribution of each meal × its score) / total scored cals
+                const weightedScore = scored.reduce((s, e) => {
                     const hs = parseInt(e.healthScore, 10);
-                    const amt = parseFloat(e[macroName]);
-                    const cals = parseFloat(e.calories);
-                    if (isNaN(hs) || hs < 1 || hs > 10) return;
-                    if (isNaN(amt) || amt <= 0) return;
-                    let value = amt;
-                    if (mode === 'per100kcal') {
-                        if (isNaN(cals) || cals <= 0) return; // skip if cannot normalize
-                        value = amt / (cals / 100);
-                    }
-                    // accumulate group
-                    if (!groups[hs]) groups[hs] = { sum: 0, count: 0 };
-                    groups[hs].sum += value;
-                    groups[hs].count += 1;
-                    // raw point uses x=hs, y=value
-                    raw.push({ x: hs, y: Number(value.toFixed(2)) });
-                });
-                const scores = Object.keys(groups).map(k => parseInt(k, 10)).sort((a, b) => a - b);
-                if (scores.length === 0) return null;
-                const avgData = scores.map(s => {
-                    const avg = groups[s].sum / groups[s].count;
-                    return { x: s, y: Number(avg.toFixed(2)) };
-                });
-                return { avgData, raw };
+                    const kcal = parseFloat(e.calories) || 0;
+                    return s + (hs * kcal);
+                }, 0) / (scoredCals || 1);
+                const pct = Math.round(weightedScore * 10);
+
+                const scoreBar = document.createElement('div');
+                scoreBar.className = 'nqb-score-row';
+                scoreBar.innerHTML = `
+                    <div class="nqb-score-label">Day Quality Score</div>
+                    <div class="nqb-score-bar-wrap">
+                        <div class="nqb-score-bar-fill" style="width:${pct}%; background:${weightedScore >= 7 ? '#34c759' : weightedScore >= 4 ? '#ff9500' : '#ff3b30'};"></div>
+                    </div>
+                    <div class="nqb-score-number" style="color:${weightedScore >= 7 ? '#34c759' : weightedScore >= 4 ? '#ff9500' : '#ff3b30'}">${weightedScore.toFixed(1)} / 10</div>`;
+                nqbEl.appendChild(scoreBar);
+
+                // ── Tier breakdown bar ──
+                if (scoredCals > 0) {
+                    const tierWrap = document.createElement('div');
+                    tierWrap.className = 'nqb-tier-wrap';
+                    tierWrap.innerHTML = `<div class="nqb-tier-label">Calories by Quality</div>`;
+                    const bar = document.createElement('div');
+                    bar.className = 'nqb-tier-bar';
+                    [
+                        { val: tiers.high,     color: '#34c759', lbl: '🟢 Quality' },
+                        { val: tiers.mid,      color: '#ff9500', lbl: '🟡 Moderate' },
+                        { val: tiers.low,      color: '#ff3b30', lbl: '🔴 Low' },
+                    ].forEach(t => {
+                        if (t.val <= 0) return;
+                        const seg = document.createElement('div');
+                        seg.className = 'nqb-tier-seg';
+                        const w = Math.round((t.val / totalCals) * 100);
+                        seg.style.cssText = `width:${w}%; background:${t.color};`;
+                        seg.title = `${t.lbl}: ${Math.round(t.val)} kcal`;
+                        bar.appendChild(seg);
+                    });
+                    tierWrap.appendChild(bar);
+                    const legend = document.createElement('div');
+                    legend.className = 'nqb-tier-legend';
+                    [
+                        { val: tiers.high, color: '#34c759', lbl: 'Quality (7–10)' },
+                        { val: tiers.mid,  color: '#ff9500', lbl: 'Moderate (4–6)' },
+                        { val: tiers.low,  color: '#ff3b30', lbl: 'Low (1–3)' },
+                    ].filter(t => t.val > 0).forEach(t => {
+                        const pctTier = Math.round((t.val / totalCals) * 100);
+                        const item = document.createElement('div');
+                        item.className = 'nqb-tier-item';
+                        item.innerHTML = `<span class="nqb-dot" style="background:${t.color}"></span><span>${t.lbl}: <b>${pctTier}%</b> (${Math.round(t.val)} kcal)</span>`;
+                        legend.appendChild(item);
+                    });
+                    tierWrap.appendChild(legend);
+                    nqbEl.appendChild(tierWrap);
+                }
             }
 
-            const p = buildMacroHealthByScore('protein');
-            const c = buildMacroHealthByScore('carbs');
-            const f = buildMacroHealthByScore('fat');
-
-            const datasets = [];
-            if (p && p.avgData.length) datasets.push({ label: 'Protein', data: p.avgData, borderColor: '#007aff', backgroundColor: '#007aff', tension: 0.4, fill: false, pointRadius: 4 });
-            if (c && c.avgData.length) datasets.push({ label: 'Carbs', data: c.avgData, borderColor: '#5856d6', backgroundColor: '#5856d6', tension: 0.4, fill: false, pointRadius: 4 });
-            if (f && f.avgData.length) datasets.push({ label: 'Fat', data: f.avgData, borderColor: '#34c759', backgroundColor: '#34c759', tension: 0.4, fill: false, pointRadius: 4 });
-
-            // Add raw scatter datasets if requested
-            if (showPoints) {
-                if (p && p.raw.length) datasets.push({ label: 'Protein (points)', data: p.raw, type: 'scatter', backgroundColor: 'rgba(0,122,255,0.9)', pointRadius: 3, showLine: false });
-                if (c && c.raw.length) datasets.push({ label: 'Carbs (points)', data: c.raw, type: 'scatter', backgroundColor: 'rgba(88,86,214,0.9)', pointRadius: 3, showLine: false });
-                if (f && f.raw.length) datasets.push({ label: 'Fat (points)', data: f.raw, type: 'scatter', backgroundColor: 'rgba(52,199,89,0.9)', pointRadius: 3, showLine: false });
+            // ── Per-meal health score mini list ──
+            const scoredMeals = filtered.filter(e => !isNaN(parseInt(e.healthScore, 10)));
+            if (scoredMeals.length > 0) {
+                const listWrap = document.createElement('div');
+                listWrap.className = 'nqb-meal-list';
+                const listTitle = document.createElement('div');
+                listTitle.className = 'nqb-meal-list-title';
+                listTitle.textContent = 'Health Score per Meal';
+                listWrap.appendChild(listTitle);
+                scoredMeals.sort((a, b) => parseInt(b.healthScore) - parseInt(a.healthScore)).forEach(e => {
+                    const hs = parseInt(e.healthScore, 10);
+                    const color = hs >= 7 ? '#34c759' : hs >= 4 ? '#ff9500' : '#ff3b30';
+                    const row = document.createElement('div');
+                    row.className = 'nqb-meal-row';
+                    row.innerHTML = `
+                        <div class="nqb-meal-name">${e.food || 'Meal'}</div>
+                        <div class="nqb-meal-bar-wrap">
+                            <div class="nqb-meal-bar" style="width:${hs*10}%; background:${color};"></div>
+                        </div>
+                        <div class="nqb-meal-score" style="color:${color};">${hs}/10</div>`;
+                    listWrap.appendChild(row);
+                });
+                nqbEl.appendChild(listWrap);
             }
 
-            if (datasets.length > 0) {
-                charts.macroHealth = new Chart(healthChartEl, {
-                    type: 'line',
-                    data: { datasets: datasets },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: true,
-                        parsing: false,
-                        scales: {
-                            x: { type: 'linear', min: 1, max: 10, ticks: { stepSize: 1, color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e' }, title: { display: true, text: 'Health Score (1-10)', color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#8e8e93' }, grid: { color: 'rgba(128,128,128,0.15)' } },
-                            y: { beginAtZero: true, ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e' }, title: { display: true, text: mode === 'per100kcal' ? 'Amount per 100 kcal' : 'Average Amount (g)', color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#8e8e93' }, grid: { color: 'rgba(128,128,128,0.15)' } }
-                        },
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: { color: getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#1c1c1e' }
-                        },
-                        tooltip: {
-                                callbacks: {
-                                    label: function(ctx) {
-                                        if (!ctx.parsed) return '';
-                                        const y = ctx.parsed.y;
-                                        const x = ctx.parsed.x;
-                                        if (ctx.dataset.type === 'scatter') return `${ctx.dataset.label}: ${y} (${x})`;
-                                        return `${ctx.dataset.label}: ${y} ${mode === 'per100kcal' ? '(per100kcal)' : 'g'} (Health ${x})`;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                });
-            } else {
-                try { const ctx2 = healthChartEl.getContext('2d'); ctx2.clearRect(0,0,healthChartEl.width, healthChartEl.height); ctx2.font='13px -apple-system'; ctx2.fillStyle='#8e8e93'; ctx2.textAlign='center'; ctx2.fillText('Not enough macro+health data to plot', healthChartEl.width/2, healthChartEl.height/2); } catch (e) {}
+            if (!hasScores) {
+                nqbEl.innerHTML = '<div style="text-align:center; padding:24px; color:var(--text-secondary); font-size:14px;">Add health scores to your meals to see the Nutrition Quality Breakdown.</div>';
             }
         }
-    } catch (e) { dbg(`Macro-health chart error: ${e && e.message}`, 'error', e); }
+    } catch (e) { dbg(`NQB chart error: ${e && e.message}`, 'error', e); }
 }
 
 // --- CLEAR DATA ---
@@ -4780,6 +6099,14 @@ window.onload = async () => {
     }
     // Attempt to load persisted settings from the repository (if configured)
     try { await loadSettingsFromRepo(); } catch (e) { dbg('loadSettingsFromRepo failed', 'debug', e); }
+    // Load budget separately — budget.json takes precedence over settings.json for dailyBudget
+    try { await loadBudgetFromRepo(); } catch (e) { dbg('loadBudgetFromRepo failed', 'debug', e); }
+
+    // Load streak from repo or local cache and update UI (do not auto-recompute)
+    try {
+        await loadStreakFromRepoOrCache();
+        try { updateStreakUI(); } catch (e) {}
+    } catch (e) { dbg('loadStreakFromRepoOrCache failed', 'debug', e); }
 
     // Initialize weight-editing setting checkbox from merged config
     try {
@@ -4986,7 +6313,17 @@ function parseCsv() {
             }
             
             const entry = {
-                timestamp: new Date().toISOString(),
+                timestamp: (() => {
+                    // Build timestamp from date+time when the CSV provides a time value
+                    // so history sort order and display reflect the actual meal time
+                    if (time !== 'Current Time') {
+                        try {
+                            const ts = new Date(date + ' ' + time);
+                            if (!isNaN(ts.getTime())) return ts.toISOString();
+                        } catch(e) {}
+                    }
+                    return new Date().toISOString();
+                })(),
                 date: date,
                 food: food,
                 calories: calories,
@@ -5089,29 +6426,30 @@ function displayCsvPreview() {
     const previewSection = document.getElementById('csv-preview-section');
     const list = document.getElementById('csv-preview-list');
     const count = document.getElementById('csv-count');
-    
+
     count.textContent = csvParsedData.length;
     list.innerHTML = '';
-    
+
     csvParsedData.forEach((entry, idx) => {
         const card = document.createElement('div');
-        card.style.cssText = 'background: var(--card-bg); padding: 12px; border-radius: 12px; margin-bottom: 10px; box-shadow: var(--shadow); border-left: 4px solid var(--primary); display: flex; gap: 12px; align-items: center;';
+        card.className = 'csv-card';
 
-        // Build editable fields for each parsed entry so user can adjust before import
-        const left = document.createElement('div');
-        left.style.flex = '1';
-
+        // ── food name ──────────────────────────────────────────
         const foodInput = document.createElement('input');
         foodInput.type = 'text';
         foodInput.value = entry.food || '';
-        foodInput.placeholder = 'Food';
-        foodInput.style.cssText = 'width:100%; padding:8px; font-size:14px; margin-bottom:6px;';
+        foodInput.placeholder = 'Food name';
+        foodInput.className = 'csv-inp csv-food';
+
+        // ── details row: calories | date | time ────────────────
+        const detailRow = document.createElement('div');
+        detailRow.className = 'csv-detail-row';
 
         const caloriesInput = document.createElement('input');
         caloriesInput.type = 'number';
         caloriesInput.value = entry.calories || 0;
-        caloriesInput.placeholder = 'Calories';
-        caloriesInput.style.cssText = 'width:140px; padding:8px; font-size:14px; margin-right:8px;';
+        caloriesInput.placeholder = 'kcal';
+        caloriesInput.className = 'csv-inp csv-cal';
 
         const dateInput = document.createElement('input');
         dateInput.type = 'date';
@@ -5119,54 +6457,41 @@ function displayCsvPreview() {
             const parsed = new Date(entry.date);
             if (!isNaN(parsed.getTime())) dateInput.value = parsed.toISOString().split('T')[0];
         } catch (e) {}
-        dateInput.style.cssText = 'padding:8px; font-size:14px; margin-right:8px;';
+        dateInput.className = 'csv-inp csv-date';
 
         const timeInput = document.createElement('input');
         timeInput.type = 'time';
-        try {
-            const t = entry.time;
-            if (t && t !== 'Current Time') {
-                const parsed = Date.parse(`1970-01-01 ${t}`);
-                if (!isNaN(parsed)) {
-                    const d2 = new Date(parsed);
-                    timeInput.value = d2.toTimeString().slice(0,5);
-                }
-            }
-        } catch (e) {}
-        timeInput.style.cssText = 'padding:8px; font-size:14px;';
+        timeInput.value = entry.time && entry.time !== 'Current Time' ? _timeTo24(entry.time) : '';
+        timeInput.className = 'csv-inp csv-time';
 
+        detailRow.appendChild(caloriesInput);
+        detailRow.appendChild(dateInput);
+        detailRow.appendChild(timeInput);
+
+        // ── macros row: protein | carbs | fat | score ──────────
         const macroRow = document.createElement('div');
-        macroRow.style.cssText = 'margin-top:8px; display:flex; gap:8px; align-items:center;';
+        macroRow.className = 'csv-macro-row';
 
         const proteinInput = document.createElement('input');
-        proteinInput.type = 'number';
-        proteinInput.value = entry.protein || '';
-        proteinInput.placeholder = 'P (g)';
-        proteinInput.style.cssText = 'width:80px; padding:8px; font-size:13px;';
+        proteinInput.type = 'number'; proteinInput.value = entry.protein || '';
+        proteinInput.placeholder = 'Protein g'; proteinInput.className = 'csv-inp';
 
         const carbsInput = document.createElement('input');
-        carbsInput.type = 'number';
-        carbsInput.value = entry.carbs || '';
-        carbsInput.placeholder = 'C (g)';
-        carbsInput.style.cssText = 'width:80px; padding:8px; font-size:13px;';
+        carbsInput.type = 'number'; carbsInput.value = entry.carbs || '';
+        carbsInput.placeholder = 'Carbs g'; carbsInput.className = 'csv-inp';
 
         const fatInput = document.createElement('input');
-        fatInput.type = 'number';
-        fatInput.value = entry.fat || '';
-        fatInput.placeholder = 'F (g)';
-        fatInput.style.cssText = 'width:80px; padding:8px; font-size:13px;';
+        fatInput.type = 'number'; fatInput.value = entry.fat || '';
+        fatInput.placeholder = 'Fat g'; fatInput.className = 'csv-inp';
 
         const scoreInput = document.createElement('select');
-        scoreInput.id = `csv-score-${idx}`;
-        scoreInput.style.cssText = 'width:80px; padding:8px; font-size:13px;';
+        scoreInput.className = 'csv-inp';
         const emptyScore = document.createElement('option');
-        emptyScore.value = '';
-        emptyScore.textContent = 'Score';
+        emptyScore.value = ''; emptyScore.textContent = 'Score';
         scoreInput.appendChild(emptyScore);
         for (let s = 1; s <= 10; s++) {
             const o = document.createElement('option');
-            o.value = String(s);
-            o.textContent = String(s);
+            o.value = String(s); o.textContent = String(s);
             if (entry.healthScore && parseInt(entry.healthScore, 10) === s) o.selected = true;
             scoreInput.appendChild(o);
         }
@@ -5176,67 +6501,41 @@ function displayCsvPreview() {
         macroRow.appendChild(fatInput);
         macroRow.appendChild(scoreInput);
 
-        left.appendChild(foodInput);
-
-        const row2 = document.createElement('div');
-        row2.style.cssText = 'display:flex; gap:8px; align-items:center; margin-top:6px;';
-        row2.appendChild(caloriesInput);
-        row2.appendChild(dateInput);
-        row2.appendChild(timeInput);
-        left.appendChild(row2);
-        left.appendChild(macroRow);
-
-        // Right actions: remove or reset
-        const right = document.createElement('div');
-        right.style.cssText = 'display:flex; flex-direction:column; gap:8px; align-items:flex-end;';
-
+        // ── remove button ───────────────────────────────────────
         const removeBtn = document.createElement('button');
-        removeBtn.className = 'btn-secondary';
-        removeBtn.textContent = 'Remove';
-        removeBtn.onclick = () => {
-            csvParsedData.splice(idx, 1);
-            displayCsvPreview();
-        };
+        removeBtn.className = 'btn-secondary csv-remove-btn';
+        removeBtn.textContent = '✕ Remove';
+        removeBtn.onclick = () => { csvParsedData.splice(idx, 1); displayCsvPreview(); };
 
-        const resetBtn = document.createElement('button');
-        resetBtn.className = 'btn-primary';
-        resetBtn.style.padding = '8px 12px';
-        resetBtn.textContent = 'Reset';
-        resetBtn.onclick = () => {
-            foodInput.value = entry.food || '';
-            caloriesInput.value = entry.calories || '';
-            try { dateInput.value = new Date(entry.date).toISOString().split('T')[0]; } catch (e) {}
-            timeInput.value = '';
-            proteinInput.value = entry.protein || '';
-            carbsInput.value = entry.carbs || '';
-            fatInput.value = entry.fat || '';
-            scoreInput.value = entry.healthScore || '';
-        };
+        card.appendChild(foodInput);
+        card.appendChild(detailRow);
+        card.appendChild(macroRow);
+        card.appendChild(removeBtn);
 
-        right.appendChild(removeBtn);
-        right.appendChild(resetBtn);
-
-        card.appendChild(left);
-        card.appendChild(right);
-
-        // Store inputs back into csvParsedData on any change
+        // ── live sync back to csvParsedData ────────────────────
         const commitChanges = () => {
+            const updDate = dateInput.value || entry.date;
+            const updTime24 = timeInput.value;
             const updated = {
                 food: foodInput.value.trim(),
                 calories: parseFloat(caloriesInput.value) || 0,
-                date: dateInput.value || entry.date,
-                time: timeInput.value ? timeInput.value : entry.time,
+                date: updDate,
+                time: updTime24 ? _time24to12(updTime24) : (entry.time || ''),
             };
+            if (updDate && updTime24) {
+                try {
+                    const ts = new Date(`${updDate}T${updTime24}`);
+                    if (!isNaN(ts.getTime())) updated.timestamp = ts.toISOString();
+                } catch (e) {}
+            }
             const p = parseFloat(proteinInput.value);
             if (!isNaN(p)) updated.protein = p; else delete updated.protein;
             const c = parseFloat(carbsInput.value);
             if (!isNaN(c)) updated.carbs = c; else delete updated.carbs;
             const f = parseFloat(fatInput.value);
             if (!isNaN(f)) updated.fat = f; else delete updated.fat;
-
             const hs = parseInt(scoreInput.value, 10);
             if (!isNaN(hs)) updated.healthScore = hs; else delete updated.healthScore;
-
             csvParsedData[idx] = { ...entry, ...updated };
             document.getElementById('csv-count').textContent = csvParsedData.length;
         };
@@ -5248,11 +6547,9 @@ function displayCsvPreview() {
 
         list.appendChild(card);
     });
-    
-    // Hide input section and show preview section
+
     inputSection.style.display = 'none';
     previewSection.style.display = 'block';
-    
     dbg(`Parsed ${csvParsedData.length} entries from CSV (Time column: ${csvTimeColumnFound ? 'found' : 'not found, using current time'})`, 'info');
 }
 
@@ -5262,69 +6559,6 @@ function backToCsvInput() {
     
     inputSection.style.display = 'block';
     previewSection.style.display = 'none';
-}
-
-// --- Time Picker Modal (iPhone-like) ---
-let timePickerTargetId = null;
-function populateTimePicker() {
-    const hr = document.getElementById('tp-hour');
-    const min = document.getElementById('tp-minute');
-    if (!hr || !min) return;
-    if (hr.children.length === 0) {
-        for (let h = 0; h < 24; h++) {
-            const o = document.createElement('option');
-            o.value = String(h).padStart(2, '0');
-            o.textContent = String(h % 12 === 0 ? 12 : h % 12).padStart(2, '0') + (h < 12 ? ' AM' : ' PM');
-            hr.appendChild(o);
-        }
-    }
-    if (min.children.length === 0) {
-        for (let m = 0; m < 60; m += 1) {
-            const o = document.createElement('option');
-            o.value = String(m).padStart(2, '0');
-            o.textContent = String(m).padStart(2, '0');
-            min.appendChild(o);
-        }
-    }
-}
-
-function openTimePicker(targetInputId) {
-    populateTimePicker();
-    timePickerTargetId = targetInputId;
-    const modal = document.getElementById('time-picker-modal');
-    const input = document.getElementById(targetInputId);
-    if (input && input.value) {
-        const v = input.value; // expects HH:MM
-        const parts = v.split(':');
-        if (parts.length === 2) {
-            const hr = document.getElementById('tp-hour');
-            const min = document.getElementById('tp-minute');
-            hr.value = parts[0];
-            min.value = parts[1];
-        }
-    }
-    if (modal) modal.style.display = 'flex';
-}
-
-function closeTimePicker() {
-    const modal = document.getElementById('time-picker-modal');
-    if (modal) modal.style.display = 'none';
-    timePickerTargetId = null;
-}
-
-function confirmTimePicker() {
-    if (!timePickerTargetId) return closeTimePicker();
-    const hr = document.getElementById('tp-hour');
-    const min = document.getElementById('tp-minute');
-    if (!hr || !min) return closeTimePicker();
-    const value = `${hr.value}:${min.value}`;
-    const input = document.getElementById(timePickerTargetId);
-    if (input) {
-        input.value = value;
-        input.dispatchEvent(new Event('input'));
-        input.dispatchEvent(new Event('change'));
-    }
-    closeTimePicker();
 }
 
 async function importCsvEntries() {

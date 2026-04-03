@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
@@ -13,6 +14,7 @@
     <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="config.js"></script>
+    <script src="report-generator.js"></script>
     <style>
     /* iOS-style toggle switch */
     .switch { position: relative; display: inline-block; width:46px; height:28px; }
@@ -54,119 +56,144 @@
 
     <!-- PAGE: ADD ENTRY (TRACKER) -->
     <div id="page-tracker" class="page active">
-        <div class="page-header">
-            <div class="header-actions">
-                <div style="display: flex; gap: 8px; padding-left: 8px; border-left: 1px solid var(--border);">
-                    <button class="btn-secondary" onclick="fetchFromGit(true)" style="padding: 10px 16px; font-size: 14px;">⬇️ Fetch Today</button>
-                    <!-- Publish button removed: per-day auto-sync in use -->
-                </div>
-                <div style="display:flex; align-items:center; gap:8px; padding-left:8px; border-left: 1px solid var(--border);">
-                    <button id="date-btn" class="btn-secondary" style="padding: 8px 12px; font-size: 13px;">Date</button>
-                </div>
-                <div style="display: flex; gap: 8px; padding-left: 8px; border-left: 1px solid var(--border);">
-                    <button class="btn-secondary" onclick="openCsvImport()" style="padding: 10px 16px; font-size: 14px;">📄 Import CSV</button>
-                    <button id="select-mode-btn" class="btn-secondary" onclick="toggleSelectMode()" style="padding: 10px 16px; font-size: 14px;">☑️ Select</button>
-                </div>
-            </div>
+        <div class="trk-page-header">
             <h1>Today's Entries</h1>
+            <div class="trk-header-actions">
+                <button class="btn-secondary trk-hdr-btn" onclick="fetchFromGit(true)">⬇️ Fetch</button>
+                <span id="date-btn" class="trk-date-badge">Loading…</span>
+                <button id="select-mode-btn" class="btn-secondary trk-hdr-btn" onclick="toggleSelectMode()">☑️ Select</button>
+            </div>
         </div>
-        
+
         <div id="bulk-actions">
             <button class="btn-secondary" onclick="selectAll()" style="flex: 1;">☑️ Select All</button>
             <button class="btn-danger" onclick="bulkDelete()" style="flex: 1;">🗑️ Delete Selected (<span id="selected-count">0</span>)</button>
             <button class="btn-secondary" onclick="exportSelectedToCsv()" style="flex: 1;">📄 Export to CSV</button>
         </div>
-        
-        <!-- Prominent budget bar replaces the old 'Total Today' stat -->
-        <div class="prominent-budget-card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                <div style="font-weight:700; font-size:18px;">Daily Budget</div>
-                <div id="budget-values" style="font-size:14px; color:var(--text-secondary);">0 / 2000 kcal</div>
+
+        <!-- Budget card -->
+        <div class="sc sc-tracker-budget">
+            <div class="sc-heading">
+                <span class="sc-icon">🎯</span>
+                <span class="sc-title">Daily Budget</span>
+                <span id="budget-values" style="margin-left:auto; font-size:13px; font-weight:600; color:var(--text-secondary);">0 / 2000 kcal</span>
             </div>
-            <div class="budget-bar-outer" aria-hidden="false">
-                <div id="budget-bar-fill" class="budget-bar-fill" style="width: 0%; display:flex;">
-                    <div id="budget-seg-fat" class="budget-seg fat" title="Fat"></div>
-                    <div id="budget-seg-protein" class="budget-seg protein" title="Protein"></div>
-                    <div id="budget-seg-carbs" class="budget-seg carbs" title="Carbs"></div>
+            <div style="padding: 0 18px 16px;">
+                <div class="budget-bar-outer" aria-hidden="false">
+                    <div id="budget-bar-fill" class="budget-bar-fill" style="width: 0%; display:flex;">
+                        <div id="budget-seg-fat" class="budget-seg fat" title="Fat"></div>
+                        <div id="budget-seg-protein" class="budget-seg protein" title="Protein"></div>
+                        <div id="budget-seg-carbs" class="budget-seg carbs" title="Carbs"></div>
+                    </div>
                 </div>
             </div>
         </div>
 
         <div class="container" id="list-container"></div>
-        
-        <div class="form-panel">
-            <h3 id="form-panel-title">Add New Entry</h3>
-            <div class="controls" id="form-container">
-                <!-- Form fields and button will be dynamically generated here -->
+
+        <!-- Add entry form card -->
+        <div class="sc sc-tracker-form">
+            <div class="sc-heading">
+                <span class="sc-icon">➕</span>
+                <span class="sc-title" id="form-panel-title">Add New Entry</span>
+                <button class="btn-secondary trk-csv-btn" onclick="openCsvImport()" title="Import from CSV">📄 CSV</button>
+            </div>
+            <div class="sc-body">
+                <div class="controls" id="form-container">
+                    <!-- Form fields generated dynamically -->
+                </div>
             </div>
         </div>
 
-        <!-- Compact weight panel (one-entry box) placed below Add New Entry -->
-        <div class="form-panel weight-panel" style="padding:12px; margin-top:12px; max-width:480px;">
-            <div style="display:flex; align-items:center; gap:12px; width:100%; min-width:0;">
-                <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-                    <label style="font-weight:600; margin:0; white-space:nowrap;">Record weight (kg)</label>
-                    <input type="number" id="weight-input" step="0.1" inputmode="decimal" placeholder="77.2" style="padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:16px; width:64px; flex:0 0 auto;">
-                </div>
-                <div class="weight-actions" style="display:flex; align-items:center; gap:8px; margin-left:auto; white-space:nowrap;">
-                    <button id="save-weight-btn" class="btn-primary" onclick="handleSaveWeight()" style="flex:0 0 auto;">Save</button>
-                    <button id="edit-weight-btn" class="btn-secondary" onclick="enableWeightEdit()" style="display:none; flex:0 0 auto;">Edit</button>
-                    <div id="weight-saved-display" style="color:var(--text-secondary); font-weight:600; margin-left:6px; white-space:nowrap; max-width:84px; overflow:hidden; text-overflow:ellipsis;"> </div>
-                </div>
+        <!-- Weight card -->
+        <div class="sc sc-tracker-weight">
+            <div class="sc-heading">
+                <span class="sc-icon">⚖️</span>
+                <span class="sc-title">Daily Weight</span>
             </div>
-            <div style="font-size:12px; color:var(--text-secondary); margin-top:8px;">Record weight once per day. If already recorded the control will be disabled.</div>
+            <div class="sc-body" style="padding-top:0;">
+                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                    <input type="number" id="weight-input" step="0.1" inputmode="decimal" placeholder="77.2"
+                           style="padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:16px; width:88px; flex:0 0 auto;">
+                    <div class="weight-actions" style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
+                        <button id="save-weight-btn" class="btn-primary" onclick="handleSaveWeight()" style="min-width:72px;">Save</button>
+                        <button id="edit-weight-btn" class="btn-secondary" onclick="enableWeightEdit()" style="display:none; min-width:64px;">Edit</button>
+                        <div id="weight-saved-display" style="color:var(--text-secondary); font-weight:600; font-size:14px;"> </div>
+                    </div>
+                </div>
+                <p class="sc-hint" style="margin-top:8px;">Record weight once per day. Control will be disabled if already logged.</p>
+            </div>
         </div>
     </div>
 
     <!-- PAGE: HISTORY -->
     <div id="page-history" class="page">
-        <div class="page-header">
+
+        <!-- Header + filter card -->
+        <div class="hp-page-header">
             <h1>Entry History</h1>
-            <div class="header-actions history-header-actions">
-                <div class="history-filter-row">
-                    <select id="range-select" class="date-filter history-filter-select" onchange="handleRangeSelect()">
+        </div>
+
+        <div class="sc sc-history-filter">
+            <div class="sc-heading">
+                <span class="sc-icon">🔍</span>
+                <span class="sc-title">Filter</span>
+            </div>
+            <div class="sc-body" style="gap:10px;">
+                <div class="hp-filter-top">
+                    <select id="range-select" class="date-filter hp-range-select" onchange="handleRangeSelect()">
                         <option value="today">Today</option>
                         <option value="yesterday">Yesterday</option>
                         <option value="7">Last 7 days</option>
                         <option value="30">Last 30 days</option>
                     </select>
-                    <div class="history-date-group">
-                        <input type="date" id="filter-date-start" class="date-filter" onchange="handleStartDateChange()" placeholder="Start">
-                        <input type="date" id="filter-date-end" class="date-filter" onchange="handleEndDateChange()" placeholder="End">
-                        <button type="button" id="apply-date-range-btn" class="btn-primary history-filter-btn" onclick="applyDateRange()">Apply</button>
-                        <button type="button" class="btn-secondary history-filter-btn" onclick="clearFilters()">Clear</button>
-                    </div>
                 </div>
-                <div class="history-search-row">
-                    <input type="text" id="filter-food" class="date-filter" placeholder="Search food..." oninput="filterHistory()">
-                    <button id="history-select-mode-btn" class="btn-secondary history-filter-btn" onclick="toggleHistorySelectMode()">☑️ Select</button>
+                <div class="hp-date-row">
+                    <input type="date" id="filter-date-start" class="date-filter" onchange="handleStartDateChange()">
+                    <input type="date" id="filter-date-end"   class="date-filter" onchange="handleEndDateChange()">
+                    <button type="button" id="apply-date-range-btn" class="btn-primary hp-filter-btn" onclick="applyDateRange()">Apply</button>
+                    <button type="button" class="btn-secondary hp-filter-btn" onclick="clearFilters()">Clear</button>
+                    <button id="history-select-mode-btn" class="btn-secondary hp-filter-btn" onclick="toggleHistorySelectMode()">☑️ Select</button>
+                </div>
+                <div class="hp-search-row">
+                    <span class="hp-search-icon">🔍</span>
+                    <input type="text" id="filter-food" class="date-filter hp-search" placeholder="Search by food name…" oninput="filterHistory()">
+                    <button id="hp-search-clear" class="hp-search-clear-btn" onclick="clearHistorySearch()" style="display:none;" aria-label="Clear search">✕</button>
                 </div>
             </div>
         </div>
-        
+
         <div id="history-bulk-actions">
             <button class="btn-secondary" onclick="historySelectAll()" style="flex: 1;">☑️ Select All</button>
             <button class="btn-danger" onclick="historyBulkDelete()" style="flex: 1;">🗑️ Delete Selected (<span id="history-selected-count">0</span>)</button>
             <button class="btn-secondary" onclick="historyExportSelectedToCsv()" style="flex: 1;">📄 Export to CSV</button>
         </div>
-        
-        <div class="history-stats">
-            <div class="stat-card-small">
-                <div class="stat-label">Total Entries</div>
-                <div class="stat-value" id="history-total-entries">0</div>
+
+        <!-- Stats strip -->
+        <div class="hs-stats-strip">
+            <div class="hs-stat hs-stat-entries">
+                <div class="hs-stat-val" id="history-total-entries">0</div>
+                <div class="hs-stat-lbl">Entries</div>
             </div>
-            <div class="stat-card-small">
-                <div class="stat-label">Total Calories</div>
-                <div class="stat-value" id="history-total-calories">0</div>
+            <div class="hs-stat hs-stat-calories">
+                <div class="hs-stat-val" id="history-total-calories">0</div>
+                <div class="hs-stat-lbl">Total kcal</div>
             </div>
-            <div class="stat-card-small">
-                <div class="stat-label">Avg / Day</div>
-                <div class="stat-value" id="history-avg-calories">0</div>
-                <div class="stat-unit">kcal</div>
+            <div class="hs-stat hs-stat-avg">
+                <div class="hs-stat-val" id="history-avg-calories">0</div>
+                <div class="hs-stat-lbl">Avg / day</div>
+            </div>
+            <div class="hs-stat hs-stat-streak">
+                <div class="hs-stat-val" id="history-streak-count">0</div>
+                <div class="hs-stat-lbl">Streak</div>
+            </div>
+            <div class="hs-stat hs-stat-best">
+                <div class="hs-stat-val" id="history-streak-best">0</div>
+                <div class="hs-stat-lbl">Best Streak</div>
             </div>
         </div>
 
-        <div style="margin: 12px 0;">
+        <div style="margin: 8px 0;">
             <button id="view-weight-graph-btn" class="btn-primary" style="display:none;" onclick="openWeightModalForRange()">View weight graph</button>
         </div>
 
@@ -175,7 +202,6 @@
             Avg Macros / Day <span id="macro-toggle-arrow">▾</span>
         </button>
 
-        <!-- Macro breakdown panel (hidden by default) — reuses existing stat card style -->
         <div class="history-stats macro-panel-hidden" id="history-macro-panel" style="margin-top:0; margin-bottom:16px;">
             <div class="stat-card-small">
                 <div class="stat-label" style="color:#007aff;">Protein</div>
@@ -199,127 +225,260 @@
 
     <!-- PAGE: ANALYTICS -->
     <div id="page-analytics" class="page">
-        <div class="page-header">
-            <h1>Analytics & Insights</h1>
-            <div class="header-actions">
+        <div class="ac-page-header">
+            <h1>Analytics &amp; Insights</h1>
+            <div class="ac-date-wrap">
+                <label class="sc-label" style="margin-bottom:4px; display:block;">Date</label>
                 <input type="date" id="analytics-date" class="date-filter" onchange="updateAnalytics()">
             </div>
         </div>
 
-
         <div id="analytics-content">
-            <div class="chart-container">
-                <h3>Calorie Distribution by Meal</h3>
-                <p id="meal-total" style="font-size:15px; font-weight:600; color:var(--primary); margin-bottom:8px;"></p>
-                <div class="chart-doughnut-wrap"><canvas id="chart-meal-distribution"></canvas></div>
-            </div>
-            
-            <div class="chart-container">
-                <h3>Macro Distribution</h3>
-                <div class="chart-doughnut-wrap"><canvas id="chart-macro-distribution"></canvas></div>
+
+            <div class="ac ac-meals">
+                <div class="ac-heading">
+                    <span class="ac-icon">🍽️</span>
+                    <span class="ac-title">Calorie Distribution by Meal</span>
+                </div>
+                <div class="ac-body">
+                    <p id="meal-total" class="ac-kpi"></p>
+                    <div class="chart-doughnut-wrap"><canvas id="chart-meal-distribution"></canvas></div>
+                </div>
             </div>
 
-            <div class="chart-container">
-                <h3>Health Score vs Macro Amount</h3>
-                <p style="color:var(--text-secondary); font-size:13px; margin-top:6px;">Shows average macro amount per Health Score bin. Toggle normalization or raw points.</p>
-                <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
-                    <label style="font-size:13px; color:var(--text-secondary);">Mode:
-                        <select id="macro-health-mode" onchange="updateAnalytics()" style="margin-left:8px; padding:6px; font-size:13px;">
-                            <option value="absolute">Absolute (g)</option>
-                            <option value="per100kcal">Per 100 kcal</option>
-                        </select>
-                    </label>
-                    <label style="font-size:13px; color:var(--text-secondary); display:flex; align-items:center; gap:10px;">
-                        <span>Show raw points</span>
-                        <label class="switch" aria-label="Show raw points">
-                            <input type="checkbox" id="macro-health-points" checked onchange="updateAnalytics()">
-                            <span class="slider"></span>
-                        </label>
-                    </label>
+            <div class="ac ac-macros">
+                <div class="ac-heading">
+                    <span class="ac-icon">⚖️</span>
+                    <span class="ac-title">Macro Distribution</span>
                 </div>
-                <canvas id="chart-macro-health-distribution"></canvas>
+                <div class="ac-body">
+                    <div class="chart-doughnut-wrap"><canvas id="chart-macro-distribution"></canvas></div>
+                </div>
             </div>
+
+            <div class="ac ac-health">
+                <div class="ac-heading">
+                    <span class="ac-icon">🥗</span>
+                    <span class="ac-title">Nutrition Quality Breakdown</span>
+                </div>
+                <div class="ac-body">
+                    <p class="ac-hint">How your calories are distributed across macros, and how each meal's health score compares.</p>
+                    <div id="ac-nqb-content">
+                        <!-- Rendered dynamically by renderAnalytics -->
+                    </div>
+                </div>
+            </div>
+
         </div>
+
+        <!-- Trend Explorer full-width action button -->
+        <button class="trend-explorer-btn" onclick="openGraphingCalculator()">
+            <span class="te-icon">📊</span>
+            <div class="te-text">
+                <div class="te-title">Trend Explorer</div>
+                <div class="te-sub">Plot correlations between calories, macros &amp; body weight</div>
+            </div>
+            <span class="te-arr">›</span>
+        </button>
     </div>
 
     <!-- PAGE: SETTINGS -->
     <div id="page-settings" class="page">
-        <div class="page-header">
-            <h1>Settings</h1>
+        <div class="settings-page-header">
+            <h1 class="settings-title">Settings</h1>
         </div>
 
-        <div class="settings-section">
-            <h3>🌙 Appearance</h3>
-            <div class="form-group">
-                <label for="theme-mode">Color Scheme</label>
-                <select id="theme-mode" class="form-input" onchange="setTheme(this.value)">
-                    <option value="auto">Auto (System)</option>
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
-                </select>
+        <!-- Search bar -->
+        <div class="settings-search-wrap">
+            <span class="settings-search-icon">🔍</span>
+            <input type="text" id="settings-search" class="settings-search-input"
+                   placeholder="Search settings…" oninput="settingsSearch(this.value)" autocomplete="off">
+            <button class="settings-search-clear" id="settings-search-clear" onclick="settingsSearchClear()" style="display:none;">✕</button>
+        </div>
+        <div id="settings-search-results" class="settings-search-results" style="display:none;"></div>
+
+        <!-- GitHub Configuration -->
+        <div class="sc sc-github" data-settings-tags="github token repository repo api key credentials pat access connect sync personal access token authentication">
+            <div class="sc-heading">
+                <span class="sc-icon">🔐</span>
+                <span class="sc-title">GitHub</span>
+            </div>
+            <div class="sc-body">
+                <div class="sc-field">
+                    <label class="sc-label">Personal Access Token</label>
+                    <div class="input-reveal-wrap">
+                        <input type="password" id="cfg-token" placeholder="ghp_..." class="form-input sc-input">
+                        <button type="button" class="input-reveal-btn" onclick="toggleTokenVisibility()" aria-label="Toggle token visibility" title="Show / hide token">
+                            <span id="token-eye-icon">👁️</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="sc-field">
+                    <label class="sc-label">Repository Path</label>
+                    <input type="text" id="cfg-repo" placeholder="username/repo-name" class="form-input sc-input">
+                </div>
+                <div class="sc-autosave-badge">
+                    <span>🔄</span>
+                    <div>
+                        <div class="sc-autosave-title">Auto-Save is always enabled</div>
+                        <div class="sc-autosave-sub">All changes sync to per-day files in the <code>data/</code> folder.</div>
+                    </div>
+                </div>
+                <button class="btn-primary sc-full-btn" onclick="saveSettings()">💾 Save &amp; Connect</button>
             </div>
         </div>
 
-        <div class="settings-section">
-            <h3>🔐 GitHub Configuration</h3>
-            <div class="form-group">
-                <label>Personal Access Token</label>
-                <div class="input-reveal-wrap">
-                    <input type="password" id="cfg-token" placeholder="ghp_..." class="form-input">
-                    <button type="button" class="input-reveal-btn" onclick="toggleTokenVisibility()" aria-label="Toggle token visibility" title="Show / hide token">
-                        <span id="token-eye-icon">👁️</span>
-                    </button>
+        <!-- Quick actions row: Streaks + Toggles -->
+        <div class="sc-quick-row">
+            <div class="sc sc-quick sc-streaks" data-settings-tags="streaks streak fire consecutive days compute longest current history">
+                <div class="sc-quick-icon">📈</div>
+                <div class="sc-quick-label">Streaks</div>
+                <div class="sc-quick-sub">View &amp; compute your streaks</div>
+                <button class="btn-primary sc-quick-btn" id="open-streaks-btn" onclick="showPage('streaks')">Open Streaks</button>
+            </div>
+            <div class="sc sc-quick sc-toggles" data-settings-tags="toggles notifications toasts weight hard refresh auto increment streak">
+                <div class="sc-quick-icon">🔧</div>
+                <div class="sc-quick-label">Toggles</div>
+                <div class="sc-quick-sub">Notifications &amp; weight options</div>
+                <button class="btn-primary sc-quick-btn" id="open-toggles-btn" onclick="openTogglesPopup()">Show Toggles</button>
+            </div>
+        </div>
+
+        <!-- Daily Budget -->
+        <div class="sc sc-budget" data-settings-tags="daily budget calorie goal target limit kcal calories per day diet">
+            <div class="sc-heading">
+                <span class="sc-icon">🎯</span>
+                <span class="sc-title">Daily Budget</span>
+            </div>
+            <div class="sc-body">
+                <div class="sc-field">
+                    <label class="sc-label">Calorie Target (kcal / day)</label>
+                    <input type="number" id="cfg-daily-budget" placeholder="2000" class="form-input sc-input" min="0">
+                </div>
+                <button class="btn-secondary sc-full-btn" onclick="saveBudgetToRepo()">📤 Save Budget to Repo</button>
+                <p class="sc-hint">The tracker shows a daily progress bar based on this target. Saved to <code>budget.json</code>.</p>
+            </div>
+        </div>
+
+        <!-- Appearance -->
+        <div class="sc sc-appearance" data-settings-tags="appearance theme dark mode light color scheme display visual ui">
+            <div class="sc-heading">
+                <span class="sc-icon">🌙</span>
+                <span class="sc-title">Appearance</span>
+            </div>
+            <div class="sc-body">
+                <div class="sc-field">
+                    <label class="sc-label">Color Scheme</label>
+                    <select id="theme-mode" class="form-input sc-input" onchange="setTheme(this.value)">
+                        <option value="auto">Auto (System)</option>
+                        <option value="light">Light</option>
+                        <option value="dark">Dark</option>
+                    </select>
                 </div>
             </div>
-            <div class="form-group">
-                <label>Repository Path</label>
-                <input type="text" id="cfg-repo" placeholder="username/repo-name" class="form-input">
-            </div>
-            <div class="form-group">
-                <div style="font-weight: 600;">🔄 Auto-Save is always enabled</div>
-                <div style="font-size: 13px; color: var(--text-secondary);">All changes are synced automatically to per-day files in the <code>data/</code> folder.</div>
-            </div>
-            <button class="btn-primary" onclick="saveSettings()">💾 Save & Connect</button>
         </div>
 
-        <div class="settings-section">
-            <h3>🔧 Toggles</h3>
-            <div class="form-group">
-                <button class="btn-primary" id="open-toggles-btn" onclick="openTogglesPopup()">Show Toggles</button>
-                <div style="font-size:13px; color:var(--text-secondary); margin-top:8px;">Open the toggles panel to access notification and weight edit options.</div>
+        <!-- Data Management -->
+        <div class="sc sc-danger" data-settings-tags="data management clear reset export report json backup delete local cache purge wipe download">
+            <div class="sc-heading">
+                <span class="sc-icon">🗄️</span>
+                <span class="sc-title">Data Management</span>
+            </div>
+            <div class="sc-body">
+                <p class="sc-hint" style="margin-top:0;">Clears all locally cached entries. Remote GitHub data is not affected.</p>
+                <button class="btn-danger sc-full-btn" onclick="clearAllData()">🗑️ Clear Local Data</button>
+                <button class="btn-secondary sc-full-btn" onclick="openReportPage()">📋 Open Report Generator</button>
             </div>
         </div>
 
-        <div class="settings-section">
-            <h3>🔄 Data Management</h3>
-            <button class="btn-danger" onclick="clearAllData()">🗑️ Clear Local Data</button>
+        <!-- App Info -->
+        <div class="sc sc-info" data-settings-tags="app info version schema data file about version number">
+            <div class="sc-heading">
+                <span class="sc-icon">📱</span>
+                <span class="sc-title">App Info</span>
+            </div>
+            <div class="sc-body">
+                <div class="sc-info-row"><span class="sc-info-key">Version</span><span class="sc-info-val">2.0.0</span></div>
+                <div class="sc-info-row"><span class="sc-info-key">Data File</span><code id="settings-datafile" class="sc-code">data/&lt;YYYY-MM-DD&gt;.json</code></div>
+                <div class="sc-info-row"><span class="sc-info-key">Schema</span><code id="settings-schema" class="sc-code">Loading...</code></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PAGE: STREAKS -->
+    <div id="page-streaks" class="page">
+
+        <!-- Hero banner -->
+        <div class="streak-hero">
+            <div class="streak-hero-text">
+                <div id="streak-hero-value" class="streak-hero-value">0</div>
+                <div class="streak-hero-flame">🔥</div>
+            </div>
+            <div id="streak-hero-sub" class="streak-hero-sub">days streak</div>
         </div>
 
-        <div class="settings-section">
-            <h3>⚖️ Weight</h3>
-            <div class="form-group">
-                <div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">Toggle weight-related settings from the Toggles panel.</div>
+        <!-- Stat cards row -->
+        <div class="streak-stats-row">
+            <div class="streak-stat-card streak-stat-current">
+                <div class="ssc-label">Current</div>
+                <div class="ssc-value" id="streak-current-value">0</div>
+                <div class="ssc-unit">days</div>
+                <div class="ssc-dates">
+                    <span class="ssc-date-item"><span class="ssc-date-dot ssc-dot-start"></span><span id="streak-current-start">—</span></span>
+                    <span class="ssc-date-sep">→</span>
+                    <span class="ssc-date-item"><span class="ssc-date-dot ssc-dot-end"></span><span id="streak-current-end">—</span></span>
+                </div>
+            </div>
+            <div class="streak-stat-card streak-stat-best">
+                <div class="ssc-label">Best</div>
+                <div class="ssc-value" id="streak-best-value">0</div>
+                <div class="ssc-unit">days</div>
+                <div class="ssc-dates">
+                    <span class="ssc-date-item"><span class="ssc-date-dot ssc-dot-start"></span><span id="streak-best-start">—</span></span>
+                    <span class="ssc-date-sep">→</span>
+                    <span class="ssc-date-item"><span class="ssc-date-dot ssc-dot-end"></span><span id="streak-best-end">—</span></span>
+                </div>
+            </div>
+            <div class="streak-stat-card streak-stat-meta">
+                <div class="ssc-label">Last Computed</div>
+                <div class="ssc-computed" id="streak-last-computed">Never</div>
+                <div class="ssc-label" style="margin-top:8px;">Date Files</div>
+                <div class="ssc-computed" id="streak-datefiles-count">—</div>
             </div>
         </div>
 
-        <div class="settings-section">
-            <h3>📱 App Info</h3>
-            <p><strong>Version:</strong> 2.0.0</p>
-            <p><strong>Data File:</strong> <code id="settings-datafile">data/&lt;YYYY-MM-DD&gt;.json</code></p>
-            <p><strong>Schema:</strong> <code id="settings-schema">Loading...</code></p>
+        <!-- Actions row -->
+        <div class="streak-actions">
+            <button id="compute-current-btn" class="btn-primary streak-action-btn" onclick="computeCurrentStreakUI()">🔁 Current Streak</button>
+            <button id="compute-longest-btn" class="btn-secondary streak-action-btn" onclick="computeLongestStreakFullScanUI()">🛠️ Longest Streak</button>
+            <button id="count-datefiles-btn" class="btn-secondary streak-action-btn" onclick="computeDateFilesCountUI()">📁 Count Files</button>
         </div>
 
-        <div class="settings-section">
-            <h3>🎯 Daily Budget</h3>
-            <div class="form-group">
-                <label>Daily Calorie Budget (kcal)</label>
-                <input type="number" id="cfg-daily-budget" placeholder="2000" class="form-input" min="0">
+        <!-- Progress bar -->
+        <div id="streak-progress-container" style="display:none; margin-top:10px;">
+            <div class="streak-progress-track">
+                <div id="streak-progress-fill" class="streak-progress-fill"></div>
             </div>
-            <div style="display:flex; gap:8px; margin-top:8px;">
-                <button class="btn-secondary" onclick="saveBudgetToRepo()">📤 Save Budget to Repo</button>
-            </div>
-            <p style="color: var(--text-secondary); font-size: 13px; margin-top:8px;">Set your target calories per day. The tracker will show a progress bar on the main screen. "Save Budget to Repo" writes budget to budget.json in your repo.</p>
+            <div id="streak-progress-text" class="streak-progress-label"></div>
         </div>
+
+        <!-- Calendar -->
+        <div id="streak-calendar" class="streak-calendar">
+            <div class="streak-cal-header">
+                <div class="streak-cal-nav">
+                    <button class="streak-nav-btn" id="streak-prev-month" onclick="streakChangeMonth(-1)">‹</button>
+                    <span id="streak-calendar-month-label" class="streak-cal-month-label">Month</span>
+                    <button class="streak-nav-btn" id="streak-next-month" onclick="streakChangeMonth(1)">›</button>
+                </div>
+                <div class="streak-cal-weekdays">
+                    <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
+                </div>
+            </div>
+            <div id="streak-calendar-grid" class="streak-calendar-grid"></div>
+        </div>
+
+        <!-- Hidden but required by updateStreakUI for recent-dates text rendering -->
+        <div id="streak-recent-dates" style="display:none;"></div>
     </div>
 
     <!-- Log Panel (Slide-out) -->
@@ -359,29 +518,29 @@
             <div class="modal-body">
                 <div id="csv-input-section">
                     <p style="color: var(--text-secondary); margin-bottom: 12px;">Paste your CSV data below. Expected format:</p>
-                    <div style="display: flex; gap: 8px; align-items: flex-start;">
-                        <pre id="example-csv" style="background: var(--bg); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--text-secondary);">date,time,food,calories,protein,carbs,fat,healthScore
-                        2026-01-15,9:00 AM,Eggs (2 whole + 2 whites),220,20.0,2.0,10.0,7
-                        2026-01-15,,Korean BBQ noodles (90 g),289,7.4,37.4,12.2,6</pre>
-                        <button class="btn-secondary" style="height: 40px; margin-top: 8px;" onclick="copyExampleCsv()">📋 Copy</button>
+                    <div style="position: relative; margin-bottom: 12px;">
+                        <pre id="example-csv" style="background: var(--bg); padding: 12px 12px 12px 12px; border-radius: 8px; font-size: 12px; color: var(--text-secondary); white-space: pre; overflow-x: auto; margin: 0; line-height: 1.5;">date,time,food,calories,protein,carbs,fat,healthScore
+2026-01-15,9:00 AM,Eggs (2 whole + 2 whites),220,20.0,2.0,10.0,7
+2026-01-15,,Korean BBQ noodles (90 g),289,7.4,37.4,12.2,6</pre>
+                        <button class="btn-secondary" style="position: absolute; top: 8px; right: 8px; padding: 6px 12px; font-size: 13px; min-height: 36px;" onclick="copyExampleCsv()">📋 Copy</button>
                     </div>
-                    <textarea id="csv-input" placeholder="Paste CSV data here..." style="width: 100%; height: 200px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 13px; margin: 12px 0;"></textarea>
-                    <button class="btn-primary" onclick="parseCsv()" style="width: 100%;">🔍 Parse & Preview</button>
+                    <textarea id="csv-input" placeholder="Paste CSV data here..." style="width: 100%; height: 170px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: monospace; font-size: 13px; margin-bottom: 12px; box-sizing: border-box; background: var(--bg); color: var(--text);"></textarea>
+                    <button class="btn-primary" onclick="parseCsv()" style="width: 100%;">🔍 Parse &amp; Preview</button>
                 </div>
                 
                     <div id="csv-preview-section" style="display: none;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 16px; background: var(--bg); border-radius: 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 14px 16px; background: var(--bg); border-radius: 12px;">
                             <div>
-                                <h3 style="margin: 0 0 4px 0; font-size: 18px;">Preview</h3>
+                                <h3 style="margin: 0 0 2px 0; font-size: 17px;">Preview</h3>
                                 <p style="margin: 0; color: var(--text-secondary); font-size: 14px;"><span id="csv-count">0</span> entries ready to import</p>
                             </div>
-                        </div>
-                        <div style="display: flex; gap: 8px;">
-                            <button class="btn-secondary" onclick="backToCsvInput()" style="padding: 10px 20px;">← Back</button>
-                            <button class="btn-primary" onclick="importCsvEntries()" style="padding: 10px 20px;">✅ Import All</button>
+                            <div style="display: flex; gap: 8px;">
+                                <button class="btn-secondary" onclick="backToCsvInput()" style="padding: 10px 16px; font-size: 14px;">← Back</button>
+                                <button class="btn-primary" onclick="importCsvEntries()" style="padding: 10px 16px; font-size: 14px;">✅ Import All</button>
+                            </div>
                         </div>
                     </div>
-                    <div id="csv-preview-list" style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 12px;"></div>
+                    <div id="csv-preview-list" style="max-height: 420px; overflow-y: auto; margin-top: 0;"></div>
                 </div>
             </div>
         </div>
@@ -414,28 +573,6 @@
         </div>
     </div>
 
-    <!-- Time Picker Modal (iPhone-alarm like) -->
-    <div id="time-picker-modal" class="modal" style="display:none;">
-        <div class="modal-content" style="max-width:320px;">
-            <div class="modal-header">
-                <h2>🕰️ Select Time</h2>
-                <button onclick="closeTimePicker()" class="modal-close">✕</button>
-            </div>
-            <div class="modal-body" style="display:flex; gap:12px; justify-content:center; align-items:center; padding: 20px;">
-                <select id="tp-hour" style="font-size:20px; padding:8px;">
-                </select>
-                <span style="font-size:20px;">:</span>
-                <select id="tp-minute" style="font-size:20px; padding:8px;">
-                </select>
-            </div>
-            <div style="padding: 16px; display:flex; gap:8px; justify-content: flex-end;">
-                <button class="btn-secondary" onclick="closeTimePicker()">Cancel</button>
-                <button class="btn-primary" onclick="confirmTimePicker()">Set</button>
-            </div>
-        </div>
-
-            
-    </div>
     <!-- Weight Edit Modal -->
     <div id="weight-edit-modal" class="modal" style="display:none;">
         <div class="modal-content" style="max-width:420px;">
@@ -457,22 +594,41 @@
         </div>
     </div>
 
-    <!-- Weight Graph Modal -->
+    <!-- Weight Graph Modal (revamped) -->
     <div id="weight-modal" class="modal" style="display:none;">
-        <div class="modal-content" style="max-width:760px; width:90%;">
+        <div class="modal-content wg-modal-content">
             <div class="modal-header">
-                <h2>📈 Weight Trend</h2>
+                <h2>⚖️ Weight Trend</h2>
                 <button onclick="closeWeightModal()" class="modal-close">✕</button>
             </div>
-            <div class="modal-body" style="padding: 12px 20px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px;">
-                    <div>Start: <span id="weight-modal-start">—</span></div>
-                    <div>End: <span id="weight-modal-end">—</span></div>
+            <div class="wg-stats-row">
+                <div class="wg-stat wg-start">
+                    <div class="wg-stat-lbl">Start</div>
+                    <div class="wg-stat-val" id="weight-modal-start">—</div>
                 </div>
-                <div style="height:320px;">
+                <div class="wg-stat wg-delta">
+                    <div class="wg-stat-lbl">Change</div>
+                    <div class="wg-stat-val" id="weight-modal-delta">—</div>
+                </div>
+                <div class="wg-stat wg-end">
+                    <div class="wg-stat-lbl">End</div>
+                    <div class="wg-stat-val" id="weight-modal-end">—</div>
+                </div>
+                <div class="wg-stat wg-avg">
+                    <div class="wg-stat-lbl">Avg</div>
+                    <div class="wg-stat-val" id="weight-modal-avg">—</div>
+                </div>
+            </div>
+            <div class="modal-body wg-chart-body">
+                <div style="height:280px; position:relative;">
                     <canvas id="chart-weight-trend" style="width:100%; height:100%;"></canvas>
                 </div>
             </div>
+            <div style="padding:12px 20px; display:flex; justify-content:flex-end;">
+                <button class="btn-secondary" onclick="closeWeightModal()">Close</button>
+            </div>
+        </div>
+    </div>
 
                 <!-- Toggles Popup Modal (Notifications + Weight) -->
                 <div id="toggles-modal" class="modal" style="display:none;">
@@ -498,6 +654,13 @@
                                         <span class="slider"></span>
                                     </label>
                                 </label>
+                                <label style="display:flex; align-items:center; justify-content:space-between;">
+                                    <span>Auto-increment streak on first entry each day</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="cfg-auto-increment-streak" onchange="toggleAutoIncrementStreak(this.checked)">
+                                        <span class="slider"></span>
+                                    </label>
+                                </label>
                                 <div style="margin-top:8px;">
                                     <button id="hard-refresh-btn" class="btn-danger" onclick="window.hardRefreshApp()" style="width:100%; padding:10px 12px;">🔁 Hard Refresh App</button>
                                     <div style="font-size:12px; color:var(--text-secondary); margin-top:8px;">Reloads the app and attempts to bypass browser cache. Useful for installed web-apps (iPhone Safari).</div>
@@ -509,8 +672,21 @@
                         </div>
                     </div>
                 </div>
-            <div style="padding: 12px; display:flex; justify-content:flex-end; gap:8px;">
-                <button class="btn-secondary" onclick="closeWeightModal()">Close</button>
+
+    <!-- Entry Preview Modal (pre-filled for +1 / Add to Today) -->
+    <div id="entry-preview-modal" class="modal" style="display:none;">
+        <div class="modal-content" style="max-width:480px;">
+            <div class="modal-header">
+                <h2 id="entry-preview-title">✏️ Review &amp; Save Entry</h2>
+                <button onclick="closeEntryPreviewModal()" class="modal-close">✕</button>
+            </div>
+            <div class="modal-body">
+                <p class="sc-hint" style="margin-bottom:16px;" id="entry-preview-hint">Review and modify before saving.</p>
+                <div id="entry-preview-form" style="display:flex; flex-direction:column; gap:12px;"></div>
+            </div>
+            <div style="padding:12px 20px; display:flex; gap:8px; justify-content:flex-end;">
+                <button class="btn-secondary" onclick="closeEntryPreviewModal()">Cancel</button>
+                <button class="btn-primary" id="entry-preview-save-btn" onclick="commitEntryPreview()">💾 Save Entry</button>
             </div>
         </div>
     </div>
