@@ -40,7 +40,7 @@ jobs:
         working-directory: calorie-tracker-ng
 
       - name: Build Angular app
-        run: npm run build
+        run: npm run build -- --base-href /harsha.github.io/
         working-directory: calorie-tracker-ng
 
       - name: Setup Pages
