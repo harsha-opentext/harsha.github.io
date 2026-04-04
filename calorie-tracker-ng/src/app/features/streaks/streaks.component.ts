@@ -1,5 +1,6 @@
 import { Component, inject, OnInit, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Router } from '@angular/router';
 import { StreaksService } from './streaks.service';
 import { StateService } from '../../core/services/state.service';
 
@@ -11,6 +12,10 @@ const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   imports: [CommonModule],
   template: `
     <div class="streaks-page">
+      <div class="sub-nav">
+        <button class="hub-back-btn" (click)="goHub()">← Hub</button>
+        <h2 class="page-title">Streaks</h2>
+      </div>
       <!-- Hero numbers -->
       <div class="streak-heroes">
         <div class="hero-card card">
@@ -118,6 +123,9 @@ const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export class StreaksComponent implements OnInit {
   readonly streakSvc = inject(StreaksService);
   readonly state = inject(StateService);
+  private readonly router = inject(Router);
+
+  goHub(): void { this.router.navigate(['/calorie-hub']); }
 
   readonly weekDays = WEEK_DAYS;
 

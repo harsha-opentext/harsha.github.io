@@ -4,6 +4,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { StateService } from '../../core/services/state.service';
 import { LoggingService } from '../../core/services/logging.service';
 import { getEntryDate, getTodayString } from '../../shared/utils/date.utils';
@@ -17,7 +18,10 @@ interface DailyPoint { date: string; calories: number; protein: number; carbs: n
   changeDetection: ChangeDetectionStrategy.Default,
   template: `
     <div class="trend-page">
-      <h2 class="page-title">Trend Explorer</h2>
+      <div class="sub-nav">
+        <button class="hub-back-btn" (click)="goHub()">← Hub</button>
+        <h2 class="page-title">Trend Explorer</h2>
+      </div>
       <p class="page-subtitle">Correlate variables across days</p>
 
       <div class="card controls-card">
@@ -121,6 +125,9 @@ export class TrendExplorerComponent implements AfterViewInit, OnDestroy {
   readonly state = inject(StateService);
   private readonly log = inject(LoggingService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly router = inject(Router);
+
+  goHub(): void { this.router.navigate(['/calorie-hub']); }
 
   @ViewChild('trendChart') trendChartRef!: ElementRef<HTMLCanvasElement>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

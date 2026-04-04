@@ -1,6 +1,7 @@
 import { Component, inject, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { StateService } from '../../core/services/state.service';
 import { HistoryService, HISTORY_PAGE_SIZE, GroupedDate } from './history.service';
 import { GithubApiService } from '../../core/services/github-api.service';
@@ -23,6 +24,10 @@ import { EntryPreviewService } from '../../shared/components/entry-preview-modal
   ],
   template: `
     <div class="history-page">
+      <div class="sub-nav">
+        <button class="hub-back-btn" (click)="goHub()">← Hub</button>
+        <h2 class="page-title">History</h2>
+      </div>
       <!-- Stats header -->
       <div class="stats-bar card">
         <div class="stat-item">
@@ -217,6 +222,9 @@ export class HistoryComponent {
   private readonly notify = inject(NotificationService);
   private readonly config = inject(ConfigService);
   private readonly entryPreview = inject(EntryPreviewService);
+  private readonly router = inject(Router);
+
+  goHub(): void { this.router.navigate(['/calorie-hub']); }
 
   readonly showWeightGraph = signal(false);
   readonly weightEditOpen = signal(false);

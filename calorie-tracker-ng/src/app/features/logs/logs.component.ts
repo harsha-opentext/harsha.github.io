@@ -1,6 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { LoggingService } from '../../core/services/logging.service';
 import { StateService } from '../../core/services/state.service';
 import { GithubApiService } from '../../core/services/github-api.service';
@@ -14,7 +15,10 @@ import { LogEntry } from '../../core/models/log.model';
   template: `
     <div class="logs-page">
       <div class="logs-toolbar">
-        <h2 class="page-title">Debug Logs</h2>
+        <div class="header-left">
+          <button class="hub-back-btn" (click)="goHub()">← Hub</button>
+          <h2 class="page-title">Debug Logs</h2>
+        </div>
         <div class="btn-row">
           <button class="btn-secondary btn-sm" (click)="log.clearLogs()">🗑️ Clear</button>
           <button class="btn-secondary btn-sm" (click)="log.copyLogs()">📋 Copy</button>
@@ -85,6 +89,9 @@ export class LogsComponent {
   readonly state = inject(StateService);
   private readonly github = inject(GithubApiService);
   private readonly notify = inject(NotificationService);
+  private readonly router = inject(Router);
+
+  goHub(): void { this.router.navigate(['/calorie-hub']); }
 
   saving = false;
 

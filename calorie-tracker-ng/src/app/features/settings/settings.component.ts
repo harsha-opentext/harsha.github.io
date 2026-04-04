@@ -1,6 +1,7 @@
 import { Component, inject, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { SettingsService } from './settings.service';
 import { ConfigService } from '../../core/services/config.service';
 import { AuthService } from '../../core/services/auth.service';
@@ -14,7 +15,10 @@ import { NotificationService } from '../../core/services/notification.service';
   imports: [CommonModule, FormsModule],
   template: `
     <div class="settings-page">
-      <h2 class="page-title">Settings</h2>
+      <div class="sub-nav">
+        <button class="hub-back-btn" (click)="goHub()">← Hub</button>
+        <h2 class="page-title">Settings</h2>
+      </div>
 
       <!-- GitHub Credentials -->
       <section class="settings-card card">
@@ -170,6 +174,9 @@ export class SettingsComponent implements OnInit {
   readonly state = inject(StateService);
   readonly log = inject(LoggingService);
   private readonly notify = inject(NotificationService);
+  private readonly router = inject(Router);
+
+  goHub(): void { this.router.navigate(['/calorie-hub']); }
 
   tokenInput = '';
   repoInput = '';

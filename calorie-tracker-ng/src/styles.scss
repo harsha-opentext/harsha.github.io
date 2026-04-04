@@ -239,3 +239,37 @@ input[type="time"]::-webkit-calendar-picker-indicator {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
+// ── Hub back button (shared across workout sub-pages) ──
+.hub-back-btn {
+  background: none;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: all 0.15s;
+  &:hover { color: var(--primary); border-color: var(--primary); }
+  &:active { transform: scale(0.95); }
+}
+
+// ── Sub-nav / header-left row shared layout ──
+.sub-nav,
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sub-nav {
+  margin-bottom: 4px;
+}
+.sub-nav .page-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+}
+

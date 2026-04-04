@@ -1,6 +1,7 @@
 import { Component, inject, computed, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { StateService } from '../../core/services/state.service';
 import { TrackerService } from './tracker.service';
 import { GithubApiService } from '../../core/services/github-api.service';
@@ -24,6 +25,10 @@ type TrackerTab = 'entry' | 'weight';
   imports: [CommonModule, FormsModule, BudgetBarComponent, EntryFormComponent, EntryCardComponent, CsvImportModalComponent],
   template: `
     <div class="tracker-page">
+      <div class="sub-nav">
+        <button class="hub-back-btn" (click)="goHub()">← Hub</button>
+        <h2 class="page-title">Log Entry</h2>
+      </div>
       <!-- Budget bar -->
       <app-budget-bar />
 
@@ -161,6 +166,9 @@ export class TrackerComponent implements OnInit {
   private readonly config = inject(ConfigService);
   readonly csvImportSvc = inject(CsvImportService);
   private readonly entryPreview = inject(EntryPreviewService);
+  private readonly router = inject(Router);
+
+  goHub(): void { this.router.navigate(['/calorie-hub']); }
 
   readonly activeTab = signal<TrackerTab>('entry');
   readonly fetching = signal(false);
