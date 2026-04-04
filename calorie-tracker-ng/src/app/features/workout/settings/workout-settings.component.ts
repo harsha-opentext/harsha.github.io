@@ -70,7 +70,9 @@ import { WorkoutConfig } from '../../../core/models/workout-config.model';
       </section>
 
       @if (settingsSvc.saving()) {
-        <div class="save-indicator">💾 Saving…</div>
+        <div class="save-indicator saving">⏳ Saving…</div>
+      } @else if (settingsSvc.savedOk()) {
+        <div class="save-indicator saved">✓ Saved</div>
       }
     </div>
   `,
@@ -92,7 +94,9 @@ import { WorkoutConfig } from '../../../core/models/workout-config.model';
     .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); display: inline-block; }
     .status-dot.off { background: var(--text-muted); }
     .connection-status.connected { color: var(--success); }
-    .save-indicator { text-align: center; font-size: 14px; color: var(--text-muted); padding: 8px; }
+    .save-indicator { text-align: center; font-size: 14px; padding: 8px; font-weight: 600; border-radius: 10px; }
+    .save-indicator.saving { color: var(--text-muted); }
+    .save-indicator.saved { color: var(--success); background: rgba(52,199,89,.1); }
     .btn-sm { font-size: 13px; padding: 8px 12px; min-height: 36px; text-decoration: none; border-radius: 10px; display: inline-flex; align-items: center; }
   `],
 })

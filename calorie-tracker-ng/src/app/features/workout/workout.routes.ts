@@ -46,4 +46,8 @@ export const WORKOUT_ROUTES: Routes = [
     path: 'report',
     loadChildren: () => import('./report/workout-report.routes').then(m => m.WORKOUT_REPORT_ROUTES),
   },
+  {
+    path: 'measurements',
+    loadChildren: () => import('./measurements/measurements.routes').then(m => m.MEASUREMENTS_ROUTES),
+  },
 ];

@@ -14,6 +14,8 @@ import { NotificationToastComponent } from './shared/components/notification-toa
 import { CsvExportModalComponent } from './shared/components/csv-export-modal/csv-export-modal.component';
 import { CsvExportService } from './shared/components/csv-export-modal/csv-export.service';
 import { EntryPreviewModalComponent } from './shared/components/entry-preview-modal/entry-preview-modal.component';
+import { FeedbackModalComponent } from './shared/components/feedback-modal/feedback-modal.component';
+import { FeedbackService } from './core/services/feedback.service';
 import { GithubApiService } from './core/services/github-api.service';
 import { WorkoutGithubApiService } from './core/services/workout-github-api.service';
 import { StreakData } from './core/models/streak.model';
@@ -28,6 +30,7 @@ import { StreakData } from './core/models/streak.model';
     NotificationToastComponent,
     CsvExportModalComponent,
     EntryPreviewModalComponent,
+    FeedbackModalComponent,
   ],
   template: `
     <div class="app-shell">
@@ -45,6 +48,12 @@ import { StreakData } from './core/models/streak.model';
       @if (csvExportSvc.state().open) {
         <app-csv-export-modal />
       }
+
+      <!-- Feedback FAB -->
+      <button class="feedback-fab" (click)="feedbackSvc.openModal()" title="Send Feedback" aria-label="Send Feedback">
+        💬
+      </button>
+      <app-feedback-modal />
     </div>
   `,
   styleUrl: './app.scss',
@@ -59,6 +68,7 @@ export class App implements OnInit {
   private readonly workoutGithub = inject(WorkoutGithubApiService);
   private readonly router = inject(Router);
   readonly csvExportSvc = inject(CsvExportService);
+  readonly feedbackSvc = inject(FeedbackService);
 
   private readonly routerEvents = toSignal(
     this.router.events.pipe(
