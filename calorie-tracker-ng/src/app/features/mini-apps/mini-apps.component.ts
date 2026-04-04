@@ -15,7 +15,10 @@ interface MiniApp {
   imports: [CommonModule],
   template: `
     <div class="apps-page">
-      <h2 class="apps-title">Mini Apps</h2>
+      <div class="sub-nav">
+        <button class="hub-back-btn" (click)="goHub()">← Hub</button>
+        <h2 class="page-title">Mini Apps</h2>
+      </div>
       <p class="apps-subtitle">Dedicated tools</p>
 
       <div class="apps-grid">
@@ -62,5 +65,7 @@ export class MiniAppsComponent {
   ];
 
   navigate(route: string): void { this.router.navigate([route]); }
+
+  goHub(): void { this.router.navigate(['/calorie-hub']); }
 }
 

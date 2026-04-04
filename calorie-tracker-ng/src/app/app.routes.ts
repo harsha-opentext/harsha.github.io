@@ -1,7 +1,22 @@
 import { Routes } from '@angular/router';
 
+function smartRedirect(): string {
+  const last = localStorage.getItem('lastUsedTracker');
+  if (last === 'workout') return '/workout';
+  if (last === 'calorie') return '/calorie-hub';
+  return '/home';
+}
+
 export const routes: Routes = [
-  { path: '', redirectTo: 'tracker', pathMatch: 'full' },
+  { path: '', redirectTo: smartRedirect, pathMatch: 'full' },
+  {
+    path: 'calorie-hub',
+    loadChildren: () => import('./features/calorie-hub/calorie-hub.routes').then(m => m.CALORIE_HUB_ROUTES),
+  },
+  {
+    path: 'home',
+    loadChildren: () => import('./features/home/home.routes').then(m => m.HOME_ROUTES),
+  },
   {
     path: 'tracker',
     loadChildren: () => import('./features/tracker/tracker.routes').then(m => m.TRACKER_ROUTES),
@@ -38,5 +53,9 @@ export const routes: Routes = [
     path: 'report',
     loadChildren: () => import('./features/report-generator/report-generator.routes').then(m => m.REPORT_GENERATOR_ROUTES),
   },
-  { path: '**', redirectTo: 'tracker' },
+  {
+    path: 'workout',
+    loadChildren: () => import('./features/workout/workout.routes').then(m => m.WORKOUT_ROUTES),
+  },
+  { path: '**', redirectTo: smartRedirect },
 ];

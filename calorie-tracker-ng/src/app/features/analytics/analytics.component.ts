@@ -4,6 +4,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { AnalyticsService } from './analytics.service';
 import { StateService } from '../../core/services/state.service';
 import { getTodayString } from '../../shared/utils/date.utils';
@@ -18,7 +19,10 @@ const DONUT_COLORS = ['#007aff', '#5856d6', '#34c759', '#ff9500', '#ff3b30', '#a
   changeDetection: ChangeDetectionStrategy.Default,
   template: `
     <div class="analytics-page">
-
+      <div class="sub-nav">
+        <button class="hub-back-btn" (click)="goHub()">← Hub</button>
+        <h2 class="page-title">Analytics</h2>
+      </div>
       <!-- Header / date picker -->
       <div class="analytics-header card">
         <label class="date-label">Date</label>
@@ -204,6 +208,9 @@ export class AnalyticsComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly state = inject(StateService);
   private readonly log = inject(LoggingService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly router = inject(Router);
+
+  goHub(): void { this.router.navigate(['/calorie-hub']); }
 
   @ViewChild('mealChart') mealChartRef!: ElementRef<HTMLCanvasElement>;
   @ViewChild('macroChart') macroChartRef!: ElementRef<HTMLCanvasElement>;

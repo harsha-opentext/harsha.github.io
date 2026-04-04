@@ -1,5 +1,6 @@
 import { Component, inject, ChangeDetectionStrategy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Router } from '@angular/router';
 import { StateService } from '../../core/services/state.service';
 import { LoggingService } from '../../core/services/logging.service';
 import { NotificationService } from '../../core/services/notification.service';
@@ -12,7 +13,10 @@ import { getEntryDate, getTodayString } from '../../shared/utils/date.utils';
   changeDetection: ChangeDetectionStrategy.Default,
   template: `
     <div class="report-page">
-      <h2 class="page-title">Report Generator</h2>
+      <div class="sub-nav">
+        <button class="hub-back-btn" (click)="goHub()">← Hub</button>
+        <h2 class="page-title">Report Generator</h2>
+      </div>
       <p class="page-subtitle">Export all tracked data as a structured JSON report</p>
 
       <div class="card summary-card">
@@ -90,6 +94,9 @@ export class ReportGeneratorComponent {
   private readonly log = inject(LoggingService);
   private readonly notify = inject(NotificationService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly router = inject(Router);
+
+  goHub(): void { this.router.navigate(['/calorie-hub']); }
 
   copied = false;
   previewJson: string | null = null;
