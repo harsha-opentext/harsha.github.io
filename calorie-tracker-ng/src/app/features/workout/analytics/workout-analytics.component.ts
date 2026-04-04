@@ -149,6 +149,18 @@ declare const Chart: {
             <p class="no-data">No fatigue data yet.</p>
           }
         </div>
+
+        <!-- Est. 1RM Progression -->
+        <div class="chart-card card">
+          <h3 class="chart-title">Estimated 1RM</h3>
+          <p class="chart-desc">Max estimated one-rep max (Epley formula) per session</p>
+          <div class="canvas-wrap" [class.hidden-chart]="!hasOneRmData()">
+            <canvas #oneRmChart></canvas>
+          </div>
+          @if (!hasOneRmData() && !loading()) {
+            <p class="no-data">No 1RM data yet (need weight & rep data).</p>
+          }
+        </div>
       }
 
       <!-- Frequency Heatmap (all workouts) -->
@@ -160,6 +172,18 @@ declare const Chart: {
         </div>
         @if (!hasFreqData() && !loading()) {
           <p class="no-data">No sessions logged yet.</p>
+        }
+      </div>
+
+      <!-- Muscle Group Balance -->
+      <div class="chart-card card">
+        <h3 class="chart-title">Muscle Group Balance</h3>
+        <p class="chart-desc">Sessions involving each muscle group in loaded date range</p>
+        <div class="canvas-wrap" [class.hidden-chart]="!hasMuscleBalData()">
+          <canvas #muscleBalChart></canvas>
+        </div>
+        @if (!hasMuscleBalData() && !loading()) {
+          <p class="no-data">No muscle data yet. Load a date range first.</p>
         }
       </div>
 
@@ -235,6 +259,8 @@ export class WorkoutAnalyticsComponent implements OnInit, AfterViewInit, OnDestr
   @ViewChild('prChart') prChartRef!: ElementRef<HTMLCanvasElement>;
   @ViewChild('fatigueChart') fatigueChartRef!: ElementRef<HTMLCanvasElement>;
   @ViewChild('freqChart') freqChartRef!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('oneRmChart') oneRmChartRef!: ElementRef<HTMLCanvasElement>;
+  @ViewChild('muscleBalChart') muscleBalChartRef!: ElementRef<HTMLCanvasElement>;
 
   readonly anSvc = inject(WorkoutAnalyticsService);
   readonly workoutState = inject(WorkoutStateService);
@@ -250,6 +276,8 @@ export class WorkoutAnalyticsComponent implements OnInit, AfterViewInit, OnDestr
   readonly hasVolumeData = signal(false);
   readonly hasFatigueData = signal(false);
   readonly hasFreqData = signal(false);
+  readonly hasOneRmData = signal(false);
+  readonly hasMuscleBalData = signal(false);
   readonly comparisonRows = signal<ReturnType<WorkoutAnalyticsService['computeComparisonTable']>>([]);
 
   // Range picker state
@@ -264,7 +292,7 @@ export class WorkoutAnalyticsComponent implements OnInit, AfterViewInit, OnDestr
     return Math.round((p.done / p.total) * 100);
   });
 
-  private charts: Array<{ destroy(): void } | null> = Array(6).fill(null);
+  private charts: Array<{ destroy(): void } | null> = Array(8).fill(null);
   private viewReady = false;
 
   ngOnInit(): void {
@@ -278,6 +306,7 @@ export class WorkoutAnalyticsComponent implements OnInit, AfterViewInit, OnDestr
   ngAfterViewInit(): void {
     this.viewReady = true;
     this.buildFreqChart();
+    this.buildMuscleBalanceChart();
   }
 
   ngOnDestroy(): void {
@@ -316,6 +345,7 @@ export class WorkoutAnalyticsComponent implements OnInit, AfterViewInit, OnDestr
       });
       if (this.selectedWorkoutId) this.refreshCharts();
       this.buildFreqChart();
+      this.buildMuscleBalanceChart();
     } finally {
       this.loading.set(false);
       this.loadProgress.set(null);
@@ -339,14 +369,22 @@ export class WorkoutAnalyticsComponent implements OnInit, AfterViewInit, OnDestr
     this.hasVolumeData.set(stats.length > 0);
     this.comparisonRows.set(this.anSvc.computeComparisonTable(this.selectedWorkoutId));
 
+    const colors = this.cssVars();
     if (stats.length > 0) {
-      const colors = this.cssVars();
       const labels = stats.map(s => s.date);
 
       this.buildLineChart(0, this.volumeChartRef, labels, stats.map(s => s.totalVolume), 'Volume (kg)', colors.primary);
       this.buildLineChart(1, this.weightChartRef, labels, stats.map(s => Math.round(s.avgWeight * 10) / 10), 'Avg Weight (kg)', colors.secondary);
       this.buildLineChart(2, this.repsChartRef, labels, stats.map(s => Math.round(s.avgReps * 10) / 10), 'Avg Reps', colors.success);
       this.buildLineChart(3, this.prChartRef, labels, stats.map(s => s.maxWeight), 'Max Weight (kg)', colors.danger);
+    }
+
+    // Est. 1RM chart
+    const oneRmData = stats.filter(s => s.estimated1RM > 0);
+    this.hasOneRmData.set(oneRmData.length > 0);
+    if (oneRmData.length > 0) {
+      this.cdr.detectChanges();
+      this.buildLineChart(6, this.oneRmChartRef, oneRmData.map(s => s.date), oneRmData.map(s => Math.round(s.estimated1RM * 10) / 10), 'Est. 1RM (kg)', colors.secondary);
     }
 
     const fatigue = this.anSvc.computeFatigueCurve(this.selectedWorkoutId);
@@ -426,6 +464,47 @@ export class WorkoutAnalyticsComponent implements OnInit, AfterViewInit, OnDestr
     });
   }
 
+  private buildMuscleBalanceChart(): void {
+    if (!this.viewReady || !this.muscleBalChartRef) return;
+    const freq = this.anSvc.computeMuscleGroupFrequency(this.rangeStart, this.rangeEnd);
+    this.hasMuscleBalData.set(freq.length > 0);
+    if (freq.length === 0) return;
+    this.cdr.detectChanges();
+    const colors = this.cssVars();
+    this.destroyChart(7);
+    this.charts[7] = new Chart(this.muscleBalChartRef.nativeElement, {
+      type: 'bar',
+      data: {
+        labels: freq.map(f => f.muscleGroup),
+        datasets: [{
+          label: 'Sessions',
+          data: freq.map(f => f.sessionCount),
+          backgroundColor: colors.primaryAlpha,
+          borderColor: colors.primary,
+          borderWidth: 1.5,
+          borderRadius: 4,
+        }],
+      },
+      options: {
+        indexAxis: 'y' as const,
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: {
+            beginAtZero: true,
+            ticks: { color: colors.textMuted, stepSize: 1 },
+            grid: { color: colors.border },
+          },
+          y: {
+            ticks: { color: colors.textMuted },
+            grid: { color: colors.border },
+          },
+        },
+      },
+    });
+  }
+
   private buildLineChart(
     index: number,
     ref: ElementRef<HTMLCanvasElement>,
@@ -497,7 +576,7 @@ export class WorkoutAnalyticsComponent implements OnInit, AfterViewInit, OnDestr
   }
 
   private destroyWorkoutCharts(): void {
-    [0, 1, 2, 3, 4].forEach(i => this.destroyChart(i));
+    [0, 1, 2, 3, 4, 6].forEach(i => this.destroyChart(i));
   }
 
   private destroyAllCharts(): void {

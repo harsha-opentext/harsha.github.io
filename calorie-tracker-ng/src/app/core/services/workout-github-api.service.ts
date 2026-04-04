@@ -12,6 +12,7 @@ import { Session } from '../models/session.model';
 import { WorkoutStreakData } from '../models/workout-streak.model';
 import { WorkoutConfig } from '../models/workout-config.model';
 import { SessionTemplate } from '../models/session-template.model';
+import { BodyMeasurement } from '../models/body-measurement.model';
 import { encodeBase64, decodeBase64 } from '../../shared/utils/base64.utils';
 
 const TIMEOUT_MS = 15_000;
@@ -224,7 +225,8 @@ export class WorkoutGithubApiService {
   async listSessionFiles(): Promise<string[]> {
     if (!this.auth.hasCredentials()) return [];
     const repo = this.auth.getRepo()!;
-    const url = `${this.base}/repos/${repo}/contents/${WORKOUT_FOLDER}`;
+    // Append cache-buster so GitHub CDN doesn't serve a stale directory listing
+    const url = `${this.base}/repos/${repo}/contents/${WORKOUT_FOLDER}?t=${Date.now()}`;
     try {
       const items = await this.get<GitHubContentsItem[]>(url);
       return (items || [])
@@ -426,6 +428,64 @@ export class WorkoutGithubApiService {
         }
       }
       this.log.dbg('saveTemplates error', 'error', e);
+      return false;
+    }
+  }
+
+  // ─── Body Measurements ───────────────────────────────────────────────────────
+
+  async loadMeasurements(): Promise<BodyMeasurement[]> {
+    if (!this.auth.hasCredentials()) return [];
+    const url = this.repoUrl('measurements.json');
+    try {
+      const j = await this.get<GitHubFileResponse>(url);
+      const decoded = decodeBase64(j.content || '');
+      const parsed = JSON.parse(decoded || '[]');
+      const measurements: BodyMeasurement[] = Array.isArray(parsed) ? parsed : [];
+      this.workoutState.fileIndex.update(idx => ({ ...idx, 'measurements': j.sha }));
+      this.log.dbg(`Loaded ${measurements.length} measurements`, 'info');
+      return measurements;
+    } catch (e: unknown) {
+      const err = e as { status?: number };
+      if (err?.status !== 404) this.log.dbg('loadMeasurements error', 'error', e);
+      return [];
+    }
+  }
+
+  async saveMeasurements(measurements: BodyMeasurement[]): Promise<boolean> {
+    if (!this.auth.hasCredentials()) return false;
+    const url = this.repoUrl('measurements.json');
+    const body: Record<string, string> = {
+      message: `Update body measurements: ${new Date().toISOString()}`,
+      content: encodeBase64(JSON.stringify(measurements, null, 2)),
+    };
+    const sha = this.workoutState.fileIndex()['measurements'];
+    if (sha) body['sha'] = sha;
+    else {
+      try {
+        const j = await this.get<GitHubFileResponse>(url);
+        if (j.sha) body['sha'] = j.sha;
+      } catch { /* new file */ }
+    }
+    try {
+      const res = await this.put<GitHubPutResponse>(url, body);
+      this.workoutState.fileIndex.update(idx => ({ ...idx, 'measurements': res.content.sha }));
+      this.log.dbg(`Saved ${measurements.length} measurements`, 'info');
+      return true;
+    } catch (e: unknown) {
+      const err = e as { status?: number };
+      if (err?.status === 409) {
+        try {
+          const j = await this.get<GitHubFileResponse>(url);
+          body['sha'] = j.sha;
+          const res = await this.put<GitHubPutResponse>(url, body);
+          this.workoutState.fileIndex.update(idx => ({ ...idx, 'measurements': res.content.sha }));
+          return true;
+        } catch (retryErr) {
+          this.log.dbg('saveMeasurements retry error', 'error', retryErr);
+        }
+      }
+      this.log.dbg('saveMeasurements error', 'error', e);
       return false;
     }
   }

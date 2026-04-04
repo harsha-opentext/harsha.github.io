@@ -2,14 +2,23 @@ import { Injectable, inject } from '@angular/core';
 import { WorkoutStateService } from '../../../core/services/workout-state.service';
 import { WorkoutGithubApiService } from '../../../core/services/workout-github-api.service';
 import { Session, SessionEntry } from '../../../core/models/session.model';
+import { MuscleGroup, getWorkoutMuscleGroups } from '../../../core/models/workout.model';
+import { calculateEntryVolume, calculateEstimated1RM } from '../../../shared/utils/workout-volume.utils';
 
 export interface PerSessionStats {
   date: string;
-  totalVolume: number;  // sum of reps * weightKg across all sets
-  avgWeight: number;    // average weightKg across all sets
-  avgReps: number;      // average reps across all sets
-  totalSets: number;
+  totalVolume: number;  // sum of reps * weightKg across all non-warmup sets
+  avgWeight: number;    // average weightKg across all non-warmup sets
+  avgReps: number;      // average reps across all non-warmup sets
+  totalSets: number;    // count of non-warmup sets
   maxWeight: number;
+  estimated1RM: number; // Epley: weight * (1 + reps/30), max across working sets
+  avgRating?: number;   // average feel rating (1–5) if rated
+}
+
+export interface MuscleGroupFrequency {
+  muscleGroup: MuscleGroup;
+  sessionCount: number;
 }
 
 export interface FatigueCurvePoint {
@@ -51,17 +60,43 @@ export class WorkoutAnalyticsService {
 
   computePerSessionStats(workoutId: string): PerSessionStats[] {
     return this.getEntriesForWorkout(workoutId).map(({ date, entry }) => {
-      const sets = entry.sets;
-      const totalVolume = sets.reduce((acc, s) => acc + s.reps * s.weightKg, 0);
-      const totalSets = sets.length;
+      const workingSets = entry.sets.filter(s => !s.isWarmup);
+      const totalVolume = calculateEntryVolume(entry);
+      const totalSets = workingSets.length;
       const avgWeight = totalSets > 0
-        ? sets.reduce((acc, s) => acc + s.weightKg, 0) / totalSets : 0;
+        ? workingSets.reduce((acc, s) => acc + s.weightKg, 0) / totalSets : 0;
       const avgReps = totalSets > 0
-        ? sets.reduce((acc, s) => acc + s.reps, 0) / totalSets : 0;
+        ? workingSets.reduce((acc, s) => acc + s.reps, 0) / totalSets : 0;
       const maxWeight = totalSets > 0
-        ? Math.max(...sets.map(s => s.weightKg)) : 0;
-      return { date, totalVolume, avgWeight, avgReps, totalSets, maxWeight };
+        ? Math.max(...workingSets.map(s => s.weightKg)) : 0;
+      const estimated1RM = calculateEstimated1RM(entry.sets);
+      const ratedSets = entry.rating != null ? [entry.rating] : [];
+      const avgRating = ratedSets.length > 0 ? ratedSets[0] : undefined;
+      return { date, totalVolume, avgWeight, avgReps, totalSets, maxWeight, estimated1RM, avgRating };
     });
+  }
+
+  /** Returns session count per muscle group within the loaded sessions range */
+  computeMuscleGroupFrequency(startDate?: string, endDate?: string): MuscleGroupFrequency[] {
+    const sessions = this.workoutState.sessions().filter(s => {
+      if (startDate && s.date < startDate) return false;
+      if (endDate && s.date > endDate) return false;
+      return true;
+    });
+    const countMap = new Map<MuscleGroup, number>();
+    for (const session of sessions) {
+      const groups = new Set<MuscleGroup>();
+      for (const entry of session.entries) {
+        const workout = this.workoutState.workouts().find(w => w.id === entry.workoutId);
+        if (workout) {
+          for (const g of getWorkoutMuscleGroups(workout)) groups.add(g);
+        }
+      }
+      for (const g of groups) countMap.set(g, (countMap.get(g) ?? 0) + 1);
+    }
+    return Array.from(countMap.entries())
+      .map(([muscleGroup, sessionCount]) => ({ muscleGroup, sessionCount }))
+      .sort((a, b) => b.sessionCount - a.sessionCount);
   }
 
   computeFatigueCurve(workoutId: string): FatigueCurvePoint[] {

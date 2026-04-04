@@ -1,5 +1,10 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, computed } from '@angular/core';
+import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
+import { WorkoutStateService } from '../../../core/services/workout-state.service';
+import { WorkoutHistoryService } from '../history/workout-history.service';
+import { calculateSessionVolume } from '../../../shared/utils/workout-volume.utils';
+import { getTodayString } from '../../../shared/utils/date.utils';
 
 interface HubApp {
   label: string;
@@ -67,6 +72,13 @@ const HUB_APPS: HubApp[] = [
     color: '#6b7280',
   },
   {
+    label: 'Measurements',
+    desc: 'Body tracking',
+    path: 'measurements',
+    svgPath: 'M19 3H5a1 1 0 00-1 1v16a1 1 0 001 1h14a1 1 0 001-1V4a1 1 0 00-1-1zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z',
+    color: '#14b8a6',
+  },
+  {
     label: 'Settings',
     desc: 'Preferences',
     path: 'settings',
@@ -78,6 +90,7 @@ const HUB_APPS: HubApp[] = [
 @Component({
   selector: 'app-workout-hub',
   standalone: true,
+  imports: [CommonModule],
   template: `
     <div class="hub-page">
       <div class="hub-header">
@@ -93,6 +106,32 @@ const HUB_APPS: HubApp[] = [
             Switch
           </button>
         </div>
+      </div>
+
+      <!-- Weekly Summary -->
+      <div class="summary-card card">
+        <div class="summary-row">
+          <div class="summary-stat">
+            <span class="stat-value">{{ thisWeekCount() }}</span>
+            <span class="stat-label">Sessions this week</span>
+          </div>
+          <div class="summary-divider"></div>
+          <div class="summary-stat">
+            <span class="stat-value">{{ weeklyTarget() }}</span>
+            <span class="stat-label">Weekly target</span>
+          </div>
+          @if (thisWeekVolume() > 0) {
+            <div class="summary-divider"></div>
+            <div class="summary-stat">
+              <span class="stat-value">{{ (thisWeekVolume() / 1000 | number:'1.1-1') }}k</span>
+              <span class="stat-label">kg volume</span>
+            </div>
+          }
+        </div>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" [style.width.%]="weekProgressPct()"></div>
+        </div>
+        <p class="progress-legend">{{ thisWeekCount() }} / {{ weeklyTarget() }} sessions · {{ weekProgressPct() }}%</p>
       </div>
 
       <div class="apps-grid">
@@ -120,6 +159,16 @@ const HUB_APPS: HubApp[] = [
     .hub-header {
       padding-top: 8px;
     }
+    /* Weekly summary */
+    .summary-card { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .summary-row { display: flex; align-items: center; gap: 12px; }
+    .summary-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 1; }
+    .stat-value { font-size: 22px; font-weight: 800; color: var(--primary); line-height: 1; }
+    .stat-label { font-size: 11px; color: var(--text-muted); font-weight: 600; text-align: center; }
+    .summary-divider { width: 1px; height: 36px; background: var(--border); flex-shrink: 0; }
+    .progress-bar-track { height: 7px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+    .progress-bar-fill { height: 100%; border-radius: 4px; background: var(--primary); transition: width .4s; }
+    .progress-legend { font-size: 12px; color: var(--text-muted); text-align: center; margin: 0; }
     .hub-header-row {
       display: flex;
       align-items: flex-start;
@@ -213,7 +262,38 @@ const HUB_APPS: HubApp[] = [
 })
 export class WorkoutHubComponent {
   private readonly router = inject(Router);
+  private readonly workoutState = inject(WorkoutStateService);
+  private readonly histSvc = inject(WorkoutHistoryService);
   readonly apps = HUB_APPS;
+
+  // Weekly summary computeds
+  readonly thisWeekDates = computed(() => {
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const daysToMonday = (dayOfWeek + 6) % 7;
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - daysToMonday);
+    const monStr = monday.toISOString().slice(0, 10);
+    const todayStr = getTodayString();
+    return this.histSvc.sessionDates().filter(d => d >= monStr && d <= todayStr);
+  });
+
+  readonly thisWeekCount = computed(() => this.thisWeekDates().length);
+
+  readonly thisWeekVolume = computed(() => {
+    const dates = new Set(this.thisWeekDates());
+    return this.histSvc.loadedSessions()
+      .filter(s => dates.has(s.date))
+      .reduce((sum, s) => sum + calculateSessionVolume(s), 0);
+  });
+
+  readonly weeklyTarget = computed(() => this.workoutState.config().weeklyTarget ?? 5);
+
+  readonly weekProgressPct = computed(() => {
+    const target = this.weeklyTarget();
+    if (target <= 0) return 0;
+    return Math.min(100, Math.round((this.thisWeekCount() / target) * 100));
+  });
 
   navigate(path: string): void {
     this.router.navigate(['/workout', path]);

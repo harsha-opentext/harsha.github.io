@@ -17,14 +17,26 @@ export class WorkoutSettingsService {
   private readonly notify = inject(NotificationService);
 
   readonly saving = signal(false);
+  readonly savedOk = signal(false);   // auto-clears after 2s
+  private savedTimer: ReturnType<typeof setTimeout> | null = null;
 
   private configSaveSubject = new Subject<WorkoutConfig>();
 
   constructor() {
-    this.configSaveSubject.pipe(debounceTime(250)).subscribe(cfg => {
-      this.workoutGithub.saveWorkoutConfig(cfg).catch(err =>
-        this.log.dbg('Workout config save (debounced) failed: ' + String(err), 'error')
-      );
+    this.configSaveSubject.pipe(debounceTime(250)).subscribe(async cfg => {
+      this.saving.set(true);
+      this.savedOk.set(false);
+      try {
+        await this.workoutGithub.saveWorkoutConfig(cfg);
+        this.savedOk.set(true);
+        if (this.savedTimer) clearTimeout(this.savedTimer);
+        this.savedTimer = setTimeout(() => this.savedOk.set(false), 2000);
+      } catch (err) {
+        this.log.dbg('Workout config save (debounced) failed: ' + String(err), 'error');
+        this.notify.showNotification('Settings save failed', 'error');
+      } finally {
+        this.saving.set(false);
+      }
     });
   }
 

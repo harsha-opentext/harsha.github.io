@@ -1,3 +1,5 @@
+export type WorkoutType = 'resistance' | 'cardio';
+
 export type MuscleGroup =
   | 'chest'
   | 'back'
@@ -26,6 +28,8 @@ export interface Workout {
   muscleGroups?: MuscleGroup[];
   /** @deprecated kept for backward-compat with old saved data – prefer muscleGroups */
   muscleGroup?: MuscleGroup;
+  /** Whether this is a resistance or cardio workout (default: resistance) */
+  type?: WorkoutType;
   description?: string;
   cues?: string;
   createdAt: string;

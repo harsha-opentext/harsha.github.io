@@ -7,7 +7,7 @@ import { WorkoutStateService } from '../../../core/services/workout-state.servic
 import { ConfirmService } from '../../../shared/components/confirm-modal/confirm.service';
 import { NotificationService } from '../../../core/services/notification.service';
 import { LoggingService } from '../../../core/services/logging.service';
-import { Workout, MuscleGroup, MUSCLE_GROUPS, getWorkoutMuscleGroups } from '../../../core/models/workout.model';
+import { Workout, MuscleGroup, MUSCLE_GROUPS, WorkoutType, getWorkoutMuscleGroups } from '../../../core/models/workout.model';
 import { generateUUID } from '../../../shared/utils/uuid.utils';
 
 type FormMode = 'create' | 'edit';
@@ -15,6 +15,7 @@ type ImportStep = 'input' | 'preview';
 
 interface WorkoutForm {
   name: string;
+  type: WorkoutType;
   muscleGroups: MuscleGroup[];
   description: string;
   cues: string;
@@ -22,18 +23,19 @@ interface WorkoutForm {
 
 interface PreviewWorkout {
   name: string;
+  type: WorkoutType;
   muscleGroupsText: string;
   description: string;
   cues: string;
   isDuplicate: boolean;
 }
 
-const EXAMPLE_CSV = `name,muscleGroups,description,cues
-Bench Press,chest,Flat barbell bench press,Keep shoulder blades retracted
-Squat,"legs,core",Barbell back squat,Break parallel — chest up
-Pull Up,back,Bodyweight pull ups,Full dead-hang at the bottom
-Overhead Press,shoulders,,Press vertically — elbows slightly forward
-Deadlift,"back,legs",Conventional deadlift,"Hinge at hips, bar over mid-foot"`;
+const EXAMPLE_CSV = `name,type,muscleGroups,description,cues
+Bench Press,resistance,chest,Flat barbell bench press,Keep shoulder blades retracted
+Squat,resistance,"legs,core",Barbell back squat,Break parallel — chest up
+Treadmill Run,cardio,legs,30 min steady-state,Maintain 65–75% max HR
+Overhead Press,resistance,shoulders,,Press vertically — elbows slightly forward
+Deadlift,resistance,"back,legs",Conventional deadlift,"Hinge at hips, bar over mid-foot"`;
 
 @Component({
   selector: 'app-workouts',
@@ -78,6 +80,13 @@ Deadlift,"back,legs",Conventional deadlift,"Hinge at hips, bar over mid-foot"`;
           <div class="field-group">
             <label class="field-label">Name <span class="required">*</span></label>
             <input type="text" class="form-input" [(ngModel)]="form.name" placeholder="e.g. Bench Press" maxlength="80" />
+          </div>
+          <div class="field-group">
+            <label class="field-label">Type</label>
+            <div class="type-toggle">
+              <button class="type-btn" [class.active]="form.type === 'resistance'" (click)="form.type = 'resistance'">🏋️ Resistance</button>
+              <button class="type-btn" [class.active]="form.type === 'cardio'" (click)="form.type = 'cardio'">🏃 Cardio</button>
+            </div>
           </div>
           <div class="field-group">
             <label class="field-label">Muscle Groups</label>
@@ -206,6 +215,9 @@ Deadlift,"back,legs",Conventional deadlift,"Hinge at hips, bar over mid-foot"`;
             <div class="workout-left">
               <div class="workout-name">{{ workout.name }}</div>
               <div class="workout-tags">
+                @if (workout.type === 'cardio') {
+                  <span class="type-tag cardio-tag">🏃 Cardio</span>
+                }
                 @for (mg of getMuscleGroups(workout); track mg) {
                   <span class="muscle-tag">{{ mg | titlecase }}</span>
                 }
@@ -290,6 +302,11 @@ Deadlift,"back,legs",Conventional deadlift,"Hinge at hips, bar over mid-foot"`;
     .muscle-check-label.checked { background: var(--primary-light); border-color: var(--primary); color: var(--primary); font-weight: 600; }
     .muscle-check-label input { display: none; }
     .btn-row { display: flex; gap: 10px; margin-top: 4px; }
+    .type-toggle { display: flex; gap: 8px; }
+    .type-btn { flex: 1; padding: 9px 0; border: 1.5px solid var(--border); border-radius: 10px; background: var(--surface-2); color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; transition: all .15s; }
+    .type-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+    .type-tag { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+    .cardio-tag { background: #fce7f3; color: #be185d; text-transform: uppercase; letter-spacing: 0.3px; }
 
     /* ── Workout cards ── */
     .empty-state { padding: 36px 24px; text-align: center; }
@@ -397,7 +414,7 @@ export class WorkoutsComponent implements OnInit {
 
   readonly nonDupCount = () => this.previewRows().filter(r => !r.isDuplicate && r.name.trim()).length;
 
-  form: WorkoutForm = { name: '', muscleGroups: [], description: '', cues: '' };
+  form: WorkoutForm = { name: '', type: 'resistance', muscleGroups: [], description: '', cues: '' };
   private editingId: string | null = null;
 
   ngOnInit(): void {
@@ -418,7 +435,7 @@ export class WorkoutsComponent implements OnInit {
 
   openCreate(): void {
     this.editingId = null;
-    this.form = { name: '', muscleGroups: [], description: '', cues: '' };
+    this.form = { name: '', type: 'resistance', muscleGroups: [], description: '', cues: '' };
     this.formMode.set('create');
     this.formOpen.set(true);
     this.detailId.set(null);
@@ -428,6 +445,7 @@ export class WorkoutsComponent implements OnInit {
     this.editingId = w.id;
     this.form = {
       name: w.name,
+      type: w.type ?? 'resistance',
       muscleGroups: getWorkoutMuscleGroups(w).slice(),
       description: w.description ?? '',
       cues: w.cues ?? '',
@@ -463,6 +481,7 @@ export class WorkoutsComponent implements OnInit {
         all.push({
           id: generateUUID(),
           name,
+          type: this.form.type,
           muscleGroups: this.form.muscleGroups.length > 0 ? this.form.muscleGroups : undefined,
           description: this.form.description.trim() || undefined,
           cues: this.form.cues.trim() || undefined,
@@ -474,6 +493,7 @@ export class WorkoutsComponent implements OnInit {
           all[idx] = {
             ...all[idx],
             name,
+            type: this.form.type,
             muscleGroups: this.form.muscleGroups.length > 0 ? this.form.muscleGroups : undefined,
             muscleGroup: undefined,
             description: this.form.description.trim() || undefined,
@@ -563,12 +583,13 @@ export class WorkoutsComponent implements OnInit {
   }
 
   private downloadCsv(list: Workout[]): void {
-    const header = 'name,muscleGroups,description,cues';
+    const header = 'name,type,muscleGroups,description,cues';
     const rows = list.map(w => {
       const mgs = getWorkoutMuscleGroups(w).join(',');
       const mgField = mgs.includes(',') ? `"${mgs}"` : mgs;
       return [
         this.escapeCsvField(w.name),
+        w.type ?? 'resistance',
         mgField,
         w.description ? this.escapeCsvField(w.description) : '',
         w.cues ? this.escapeCsvField(w.cues) : '',
@@ -637,6 +658,7 @@ export class WorkoutsComponent implements OnInit {
       this.importError.set('CSV must have a "name" column.');
       return;
     }
+    const typeIdx = header.indexOf('type');
     const mgIdx = header.indexOf('musclegroups');
     const descIdx = header.indexOf('description');
     const cuesIdx = header.indexOf('cues');
@@ -647,8 +669,10 @@ export class WorkoutsComponent implements OnInit {
       const cols = this.parseCsvRow(lines[i]);
       const name = (cols[nameIdx] ?? '').trim();
       if (!name) continue;
+      const rawType = typeIdx !== -1 ? (cols[typeIdx] ?? '').trim().toLowerCase() : '';
       rows.push({
         name,
+        type: rawType === 'cardio' ? 'cardio' : 'resistance',
         muscleGroupsText: mgIdx !== -1 ? (cols[mgIdx] ?? '').trim() : '',
         description: descIdx !== -1 ? (cols[descIdx] ?? '').trim() : '',
         cues: cuesIdx !== -1 ? (cols[cuesIdx] ?? '').trim() : '',
@@ -684,6 +708,7 @@ export class WorkoutsComponent implements OnInit {
       const newWorkouts: Workout[] = rows.map(r => ({
         id: generateUUID(),
         name: r.name.trim(),
+        type: r.type,
         muscleGroups: this.parseMuscleGroupsText(r.muscleGroupsText) || undefined,
         description: r.description.trim() || undefined,
         cues: r.cues.trim() || undefined,

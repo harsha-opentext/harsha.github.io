@@ -18,3 +18,29 @@
   width: 100%;
   box-sizing: border-box;
 }
+
+/* Feedback FAB */
+.feedback-fab {
+  position: fixed;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  right: 18px;
+  z-index: 200;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 122, 255, 0.35);
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.15s;
+
+  &:active {
+    transform: scale(0.9);
+  }
+}
